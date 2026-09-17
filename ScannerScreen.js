@@ -1,192 +1,205 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { 
-  Text, 
-  View, 
-  StyleSheet, 
-  Button, 
-  TextInput, 
-  Alert,
-  Platform 
+import React, { useState, useContext, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView
 } from 'react-native';
-
-// 1. IMPORTAÇÕES DA CÂMERA
+import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useFocusEffect } from '@react-navigation/native';
+import { ThemeContext } from './ThemeContext';
+import { getScannerStyles, colors } from './styles';
+import AppAlert, { useAppAlert } from './AppAlert';
 
-import { ThemeContext } from './ThemeContext'; 
+const registrarHistorico = async (codigo) => {
+  try {
+    const raw = await AsyncStorage.getItem('@historico_scan');
+    const lista = raw ? JSON.parse(raw) : [];
+    const atualizado = [codigo, ...lista.filter((c) => c !== codigo)].slice(0, 20);
+    await AsyncStorage.setItem('@historico_scan', JSON.stringify(atualizado));
+  } catch (e) {
+    console.error('Erro ao salvar histórico:', e);
+  }
+};
 
 export default function ScannerScreen({ navigation }) {
   const { isDarkMode } = useContext(ThemeContext);
-  const styles = getDynamicStyles(isDarkMode);
+  const styles = getScannerStyles(isDarkMode);
+  const { alert, showAlert } = useAppAlert();
 
-  // 2. ESTADOS DA CÂMERA
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  
-  const [qrCodeDigitado, setQrCodeDigitado] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [codigoManual, setCodigoManual] = useState('');
 
-  // 3. REINICIAR SCANNER AO VOLTAR PARA A TELA
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      setScanned(false);
-    });
-    return unsubscribe;
-  }, [navigation]);
+  // Pausa a câmera automaticamente ao sair da tela
+  useFocusEffect(
+    useCallback(() => {
+      setIsScanning(false);
+    }, [])
+  );
 
-  // 4. VERIFICAÇÕES DE PERMISSÃO
+  const Header = () => (
+    <View style={styles.header}>
+      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#F2F3F5' : '#111'} />
+      </TouchableOpacity>
+      <View style={{ width: 24 }} />
+    </View>
+  );
+
   if (!permission) {
-    // Permissão ainda está carregando
-    return <View style={styles.container} />
-  }
-
-  if (!permission.granted) {
-    // Usuário ainda não deu permissão
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Permissão Necessária</Text>
-        <Text style={styles.text}>
-          Precisamos acessar a sua câmera para escanear os calçados.
-        </Text>
-        <Button title="Conceder Permissão" onPress={requestPermission} />
+      <View style={{ flex: 1 }}>
+        <Header />
+        <View style={styles.containerCenter}>
+          <Text style={styles.textMuted}>Carregando permissões...</Text>
+        </View>
       </View>
     );
   }
 
-  // 5. FUNÇÃO EXECUTADA AO LER O QR CODE
-  const handleBarCodeScanned = ({ type, data }) => {
-    setScanned(true); // Trava a câmera para não ler 10 vezes no mesmo segundo
-    
-    // Navega automaticamente para a tela de Produto passando o QR Code lido
-    navigation.navigate('Produto', { qrCode: data });
+  if (!permission.granted) {
+    return (
+      <View style={{ flex: 1 }}>
+        <Header />
+        <View style={styles.containerCenter}>
+          <Ionicons name="camera-outline" size={60} color={isDarkMode ? '#555' : '#ccc'} style={{ marginBottom: 20 }} />
+          <Text style={[styles.title, { textAlign: 'center', marginBottom: 20 }]}>
+            Precisamos de acesso à câmera
+          </Text>
+          <TouchableOpacity style={styles.btnPrimary} onPress={requestPermission}>
+            <Text style={styles.btnPrimaryText}>Permitir Câmera</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // 1. Função de Confirmação do Produto
+  const handleBarCodeScanned = ({ data }) => {
+    setIsScanning(false); // Trava a câmera imediatamente após ler
+    const codigoLimpo = String(data).trim();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    showAlert({
+      type: 'info',
+      title: 'Código Identificado',
+      message: `O scanner leu: ${codigoLimpo}\n\nDeseja ver os detalhes deste calçado?`,
+      actions: [
+        {
+          label: 'Confirmar',
+          onPress: () => {
+            registrarHistorico(codigoLimpo);
+            navigation.navigate('Produto', { qrCode: codigoLimpo });
+          }
+        },
+        {
+          label: 'Ler Novamente',
+          style: 'cancel',
+          onPress: () => setIsScanning(true) // Reativa a câmera para tentar de novo
+        },
+        {
+          label: 'Cancelar Leitura',
+          style: 'cancel',
+          onPress: () => setIsScanning(false) // Reseta a câmera para o estado inativo
+        }
+      ],
+    });
   };
 
-  // Função da busca manual (Plano B)
-  const handleBuscarProduto = () => {
-    if (qrCodeDigitado.trim() === '') {
-      Alert.alert('Erro', 'Por favor, digite o código do produto.');
+  const handleBuscaManual = () => {
+    if (!codigoManual.trim()) {
+      showAlert({ type: 'warning', title: 'Aviso', message: 'Digite o ID do calçado.', actions: [{ label: 'OK' }] });
       return;
     }
-    navigation.navigate('Produto', { qrCode: qrCodeDigitado });
+    const codigoLimpo = String(codigoManual).trim();
+    registrarHistorico(codigoLimpo);
+    navigation.navigate('Produto', { qrCode: codigoLimpo });
+    setCodigoManual('');
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Escanear Produto</Text>
-      
-      {/* --- CÂMERA --- */}
-      <View style={styles.cameraContainer}>
-        <CameraView
-          style={styles.camera}
-          facing="back" // Usa a câmera traseira
-          barcodeScannerSettings={{
-            barcodeTypes: ["qr"], // Otimiza para procurar apenas QR Codes
-          }}
-          // Se já escaneou, desativa a leitura temporariamente
-          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-        />
-      </View>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <Header />
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Scanner de Estoque</Text>
 
-      {scanned && (
-        <Button 
-          title="Escanear Novamente" 
-          onPress={() => setScanned(false)} 
-        />
-      )}
+        {/* CAIXA DA CÂMERA (Com Placeholder de descanso) */}
+        <View style={styles.cameraWrapper}>
+          {isScanning ? (
+            <>
+              <CameraView 
+                style={styles.camera} 
+                onBarcodeScanned={handleBarCodeScanned}
+                barcodeScannerSettings={{
+                  barcodeTypes: ["qr", "ean13", "ean8", "code128"],
+                }}
+              />
+              <View style={styles.miraVisual} />
+            </>
+          ) : (
+            <View style={styles.cameraPlaceholder}>
+              <Ionicons name="videocam-off-outline" size={60} color={isDarkMode ? '#555' : '#aaa'} />
+              <Text style={styles.placeholderText}>Câmera inativa</Text>
+            </View>
+          )}
+        </View>
 
-      {/* --- DIVISOR VISUAL --- */}
-      <View style={styles.divider}>
-        <View style={styles.line} />
-        <Text style={styles.dividerText}>OU</Text>
-        <View style={styles.line} />
-      </View>
-      
-      {/* --- BUSCA MANUAL --- */}
-      <Text style={styles.text}>
-        Digite o ID do produto manualmente:
-      </Text>
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Ex: TENIS-PRO-AZ-40"
-        placeholderTextColor={isDarkMode ? '#888' : '#aaa'} 
-        value={qrCodeDigitado}
-        onChangeText={setQrCodeDigitado}
-        autoCapitalize="none"
-      />
-      
-      <Button 
-        title="Buscar Manualmente" 
-        onPress={handleBuscarProduto}
-        color={Platform.OS === 'ios' && isDarkMode ? '#007aff' : (Platform.OS === 'ios' ? '#007aff' : undefined)}
-      />
-    </View>
+        {/* 2. Função de Ativar o Scanner */}
+        {isScanning ? (
+          <TouchableOpacity 
+            style={[styles.btnPrimary, { backgroundColor: colors(isDarkMode).danger }]}
+            onPress={() => setIsScanning(false)}
+          >
+            <Ionicons name="stop-circle-outline" size={24} color="#FFF" style={{ marginRight: 8 }} />
+            <Text style={styles.btnPrimaryText}>Cancelar Leitura</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={styles.btnPrimary} 
+            onPress={() => setIsScanning(true)}
+          >
+            <Ionicons name="barcode-outline" size={24} color="#FFF" style={{ marginRight: 8 }} />
+            <Text style={styles.btnPrimaryText}>Iniciar Leitura</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.dividerContainer}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>ou</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <View style={styles.manualContainer}>
+          <Text style={styles.label}>Digite o ID do calçado:</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ex: NIKE-SB-42"
+            placeholderTextColor={isDarkMode ? '#555' : '#aaa'}
+            value={codigoManual}
+            onChangeText={setCodigoManual}
+            autoCapitalize="characters"
+            returnKeyType="search"
+            onSubmitEditing={handleBuscaManual}
+          />
+          <TouchableOpacity 
+            style={styles.btnManual} 
+            onPress={handleBuscaManual}
+          >
+            <Text style={styles.btnManualText}>Buscar Manualmente</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+      <AppAlert {...alert} />
+    </KeyboardAvoidingView>
   );
 }
-
-const getDynamicStyles = (isDarkMode) => {
-  const colors = {
-    background: isDarkMode ? '#313338' : '#f5f5f5',
-    text: isDarkMode ? '#F2F3F5' : '#000000',
-    card: isDarkMode ? '#2B2D31' : '#FFFFFF',
-    border: isDarkMode ? '#1E1F22' : '#ccc',
-  };
-
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      justifyContent: 'center',
-      padding: 20,
-      backgroundColor: colors.background,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      textAlign: 'center',
-      marginBottom: 20,
-      color: colors.text,
-    },
-    text: {
-      fontSize: 16,
-      textAlign: 'center',
-      marginBottom: 10,
-      color: colors.text,
-    },
-    cameraContainer: {
-      height: 300,
-      width: '100%',
-      borderRadius: 15,
-      overflow: 'hidden',
-      marginBottom: 20,
-      borderWidth: 2,
-      borderColor: colors.border,
-    },
-    camera: { flex: 1 },
-    divider: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginVertical: 20,
-    },
-    line: {
-      flex: 1,
-      height: 1,
-      backgroundColor: colors.border,
-    },
-    dividerText: {
-      width: 50,
-      textAlign: 'center',
-      color: colors.text,
-      fontWeight: 'bold',
-    },
-    input: {
-      height: 50,
-      borderColor: colors.border,
-      borderWidth: 1,
-      borderRadius: 5,
-      padding: 10,
-      fontSize: 16,
-      marginBottom: 20,
-      textAlign: 'center',
-      backgroundColor: colors.card,
-      color: colors.text,
-    }
-  });
-};

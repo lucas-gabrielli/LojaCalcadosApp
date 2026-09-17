@@ -1,114 +1,103 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { 
-  NavigationContainer, 
-  DefaultTheme, 
-  DarkTheme 
-} from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { AppState, View, ActivityIndicator } from 'react-native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as LocalAuthentication from 'expo-local-authentication';
+import { LogBox } from 'react-native';
 
-// 1. IMPORTAÇÕES DO FIREBASE E LOGIN
-import { onAuthStateChanged } from 'firebase/auth';
+LogBox.ignoreLogs(['@firebase/firestore: Firestore', 'BloomFilter error']);
+
 import { auth } from './firebaseConfig';
-import LoginScreen from './LoginScreen';
+import { onAuthStateChanged } from 'firebase/auth';
+import { ThemeProvider, ThemeContext } from './ThemeContext';
+import FloatingTabBar from './FloatingTabBar';
 
-import { ThemeContext, ThemeProvider } from './ThemeContext';
+import LoginScreen from './LoginScreen';
+import HomeScreen from './HomeScreen';
 import ScannerScreen from './ScannerScreen';
 import ProdutoScreen from './ProdutoScreen';
+import SolicitacoesScreen from './SolicitacoesScreen';
 import RelatorioScreen from './RelatorioScreen';
 import ConfiguracoesScreen from './ConfiguracoesScreen';
+import MetasScreen from './MetasScreen';
+import HistoricoScreen from './HistoricoScreen';
+import SegurancaScreen from './SegurancaScreen';
+import AparenciaScreen from './AparenciaScreen';
+import SacolaScreen from './SacolaScreen'; // NOVO IMPORT
 
-const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const Stack = createNativeStackNavigator();
 
-function ScannerStack() {
+function InicioStack() {
   return (
-    <Stack.Navigator>
-      <Stack.Screen name="Scanner" component={ScannerScreen} options={{ title: 'Escanear Calçado' }} />
-      <Stack.Screen name="Produto" component={ProdutoScreen} options={{ title: 'Detalhes do Produto' }} />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Scanner" component={ScannerScreen} />
+      <Stack.Screen name="Produto" component={ProdutoScreen} />
     </Stack.Navigator>
   );
 }
 
-function NavigationContent() {
-  const { isDarkMode } = useContext(ThemeContext);
-  
-  // CRIAMOS UM TEMA ESCURO CUSTOMIZADO AQUI!
-  const CustomDarkTheme = {
-    ...DarkTheme,
-    colors: {
-      ...DarkTheme.colors,
-      background: '#313338', // Fundo das telas vazias
-      card: '#2B2D31',       // Fundo da barra inferior
-      text: '#F2F3F5',       // Texto padrão
-      border: '#1E1F22',     // Linha divisória da barra
-      primary: '#5865F2',    // Cor do ícone quando está selecionado
-    },
-  };
+function ConfiguracoesStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="MenuConfiguracoes" component={ConfiguracoesScreen} />
+      <Stack.Screen name="Metas" component={MetasScreen} />
+      <Stack.Screen name="Historico" component={HistoricoScreen} />
+      <Stack.Screen name="Seguranca" component={SegurancaScreen} />
+      <Stack.Screen name="Aparencia" component={AparenciaScreen} />
+      <Stack.Screen name="Relatorio" component={RelatorioScreen} />
+    </Stack.Navigator>
+  );
+}
 
-  const navigationTheme = isDarkMode ? CustomDarkTheme : DefaultTheme;
+function MainNavigator() {
+  const { isDarkMode, isBiometricEnabled } = useContext(ThemeContext);
+  const appState = useRef(AppState.currentState);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active' && isBiometricEnabled) {
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Acesso Restrito - Controle de Estoque',
+          fallbackLabel: 'Usar senha',
+        });
+        if (!result.success) console.log("Falha na autenticação");
+      }
+      appState.current = nextAppState;
+    });
+    return () => subscription.remove();
+  }, [isBiometricEnabled]);
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer theme={isDarkMode ? DarkTheme : DefaultTheme}>
       <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ focused, color, size }) => {
-            let iconName;
-            if (route.name === 'Estoque') iconName = focused ? 'barcode' : 'barcode-outline';
-            else if (route.name === 'Relatórios') iconName = focused ? 'document-text' : 'document-text-outline';
-            else if (route.name === 'Configurações') iconName = focused ? 'settings' : 'settings-outline';
-            return <Ionicons name={iconName} size={size} color={color} />;
-          },
-          headerShown: false,
-        })}
+        screenOptions={{ headerShown: false }}
+        tabBar={(props) => <FloatingTabBar {...props} />}
       >
-        <Tab.Screen name="Estoque" component={ScannerStack} />
-        <Tab.Screen name="Relatórios" component={RelatorioScreen} />
-        <Tab.Screen name="Configurações" component={ConfiguracoesScreen} />
+        <Tab.Screen name="Início" component={InicioStack} />
+        <Tab.Screen name="Sacola" component={SacolaScreen} />
+        <Tab.Screen name="Solicitações" component={SolicitacoesScreen} />
+        <Tab.Screen name="Configurações" component={ConfiguracoesStack} />
       </Tab.Navigator>
     </NavigationContainer>
   );
 }
 
-// 2. COMPONENTE CÃO DE GUARDA
-function AuthGate() {
+export default function App() {
   const [user, setUser] = useState(null);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fica escutando o Firebase. Mudou de usuário? Ele atualiza a tela na hora.
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setIsInitializing(false);
+      setLoading(false);
     });
     return unsubscribe;
   }, []);
 
-  // Enquanto o Firebase decide se tem alguém logado, mostra uma rodinha carregando
-  if (isInitializing) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#007bff" />
-      </View>
-    );
-  }
+  if (loading) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#5865F2" /></View>;
 
-  // 3. A BARREIRA: Se não tem usuário, mostra SÓ a tela de login
-  if (!user) {
-    return <LoginScreen />;
-  }
-
-  // Se passou da barreira, libera o app de estoque!
-  return <NavigationContent />;
-}
-
-export default function App() {
-  return (
-    <ThemeProvider>
-      {/* Colocamos o Cão de Guarda aqui dentro */}
-      <AuthGate />
-    </ThemeProvider>
-  );
+  return <ThemeProvider>{user ? <MainNavigator /> : <LoginScreen />}</ThemeProvider>;
 }

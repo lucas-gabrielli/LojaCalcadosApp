@@ -1,20 +1,36 @@
 import React, { createContext, useState, useMemo, useEffect } from 'react';
 import { useColorScheme } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
-  // Pega o tema do celular (agora vai funcionar porque você ajustou o app.json!)
-  const systemScheme = useColorScheme(); 
+  const systemScheme = useColorScheme();
+  const [themeMode, setThemeMode] = useState('system');
   
-  // Estado que guarda a opção escolhida: 'system', 'light' ou 'dark'
-  const [themeMode, setThemeMode] = useState('system'); 
+  // NOVO: Estado para a Biometria
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
 
-  // Calcula se o app deve estar escuro baseado na escolha atual
+  // Carrega a preferência de biometria ao iniciar o app
+  useEffect(() => {
+    const loadSettings = async () => {
+      const savedBiometry = await AsyncStorage.getItem('@biometry_enabled');
+      if (savedBiometry !== null) {
+        setIsBiometricEnabled(JSON.parse(savedBiometry));
+      }
+    };
+    loadSettings();
+  }, []);
+
+  // Função para salvar a preferência
+  const toggleBiometry = async () => {
+    const newValue = !isBiometricEnabled;
+    setIsBiometricEnabled(newValue);
+    await AsyncStorage.setItem('@biometry_enabled', JSON.stringify(newValue));
+  };
+
   const isDarkMode = useMemo(() => {
-    if (themeMode === 'system') {
-      return systemScheme === 'dark';
-    }
+    if (themeMode === 'system') return systemScheme === 'dark';
     return themeMode === 'dark';
   }, [themeMode, systemScheme]);
 
@@ -22,9 +38,11 @@ export const ThemeProvider = ({ children }) => {
     () => ({
       isDarkMode,
       themeMode,
-      setThemeMode, // Nova função para trocar a opção direto
+      setThemeMode,
+      isBiometricEnabled, // Exportando o estado
+      toggleBiometry,     // Exportando a função de troca
     }),
-    [isDarkMode, themeMode]
+    [isDarkMode, themeMode, isBiometricEnabled]
   );
 
   return (

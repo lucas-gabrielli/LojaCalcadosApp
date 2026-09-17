@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useContext } from 'react'; 
-import { 
-  Text, 
-  View, 
-  StyleSheet, 
-  FlatList, 
-  ActivityIndicator, 
-  Alert,
+import React, { useState, useEffect, useContext } from 'react';
+import {
+  Text,
+  View,
+  FlatList,
+  ActivityIndicator,
   Pressable,
   Modal,
   TouchableOpacity
@@ -13,20 +11,21 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import Constants from 'expo-constants';
 import Ionicons from '@expo/vector-icons/Ionicons'; // NOVO: Ícones para a interface
 
 import { db, auth } from './firebaseConfig';
-import { 
-  collection, 
-  query, 
-  getDocs, 
-  orderBy, 
-  where, 
-  Timestamp 
+import {
+  collection,
+  query,
+  getDocs,
+  orderBy,
+  where,
+  Timestamp
 } from 'firebase/firestore';
 
 import { ThemeContext } from './ThemeContext';
+import { getRelatorioStyles, colors } from './styles';
+import AppAlert, { useAppAlert } from './AppAlert';
 
 const gerarConteudoHTML = (solicitacoes, filtroTempo, filtroStatus) => {
   let totalSolicitacoes = solicitacoes.length;
@@ -89,20 +88,24 @@ const gerarConteudoHTML = (solicitacoes, filtroTempo, filtroStatus) => {
   `;
 };
 
-export default function RelatorioScreen() {
+export default function RelatorioScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [solicitacoes, setSolicitacoes] = useState([]);
   const isFocused = useIsFocused();
-  
+
   // ESTADOS DOS FILTROS
   const [filtroTempo, setFiltroTempo] = useState('todos');
   const [filtroStatus, setFiltroStatus] = useState('todos');
   const [modalFiltroVisible, setModalFiltroVisible] = useState(false);
-  
+
   const [isGerandoPDF, setIsGerandoPDF] = useState(false);
 
   const { isDarkMode } = useContext(ThemeContext);
-  const styles = getDynamicStyles(isDarkMode);
+  const styles = getRelatorioStyles(isDarkMode);
+  const c = colors(isDarkMode);
+  const { alert, showAlert } = useAppAlert();
+
+  const STATUS_DOT_COLOR = { pendente: c.warning, vendida: c.success, cancelada: c.danger };
 
   const fetchSolicitacoes = async () => {
     setLoading(true);
@@ -158,7 +161,7 @@ export default function RelatorioScreen() {
       setSolicitacoes(listaSolicitacoes);
     } catch (e) {
       console.error("Erro ao buscar solicitações: ", e);
-      Alert.alert('Erro', 'Não foi possível carregar o relatório. Verifique o console para criar o Índice no Firebase.');
+      showAlert({ type: 'danger', title: 'Erro', message: 'Não foi possível carregar o relatório. Verifique o console para criar o Índice no Firebase.', actions: [{ label: 'OK' }] });
     } finally {
       setLoading(false);
     }
@@ -172,7 +175,7 @@ export default function RelatorioScreen() {
 
   const handleGerarPDF = async () => {
     if (solicitacoes.length === 0) {
-      Alert.alert('Relatório Vazio', 'Não há dados para gerar um PDF com os filtros atuais.');
+      showAlert({ type: 'warning', title: 'Relatório Vazio', message: 'Não há dados para gerar um PDF com os filtros atuais.', actions: [{ label: 'OK' }] });
       return;
     }
     setIsGerandoPDF(true);
@@ -185,11 +188,11 @@ export default function RelatorioScreen() {
           dialogTitle: 'Baixar Relatório',
         });
       } else {
-        Alert.alert('Erro', 'O compartilhamento não está disponível neste dispositivo.');
+        showAlert({ type: 'danger', title: 'Erro', message: 'O compartilhamento não está disponível neste dispositivo.', actions: [{ label: 'OK' }] });
       }
     } catch (error) {
       console.error('Erro ao gerar PDF:', error);
-      Alert.alert('Erro', 'Não foi possível gerar o PDF.');
+      showAlert({ type: 'danger', title: 'Erro', message: 'Não foi possível gerar o PDF.', actions: [{ label: 'OK' }] });
     } finally {
       setIsGerandoPDF(false);
     }
@@ -224,12 +227,21 @@ export default function RelatorioScreen() {
     </View>
   );
 
+  const totalVendidas = solicitacoes.filter((s) => s.status === 'vendida').length;
+  const totalPendentes = solicitacoes.filter((s) => s.status === 'pendente').length;
+  const totalCanceladas = solicitacoes.filter((s) => s.status === 'cancelada').length;
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Meus Relatórios</Text>
-        <TouchableOpacity 
-            style={styles.btnAbrirFiltro} 
+        <View style={styles.headerTitleGroup}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#F2F3F5' : '#111'} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Meus Relatórios</Text>
+        </View>
+        <TouchableOpacity
+            style={styles.btnAbrirFiltro}
             onPress={() => setModalFiltroVisible(true)}
             accessibilityLabel="Abrir filtros avançados"
         >
@@ -242,6 +254,21 @@ export default function RelatorioScreen() {
           <Text style={styles.resumoTexto}>
               Mostrando: {filtroStatus === 'todos' ? 'Tudo' : filtroStatus} / {filtroTempo === 'todos' ? 'Desde o início' : filtroTempo === 'dia' ? 'Hoje' : filtroTempo === 'semana' ? '7 dias' : '30 dias'}
           </Text>
+      </View>
+
+      <View style={styles.statsRow}>
+        <View style={[styles.statBadge, styles.statBadgeVendida]}>
+          <Text style={[styles.statNumber, styles.statNumberVendida]}>{totalVendidas}</Text>
+          <Text style={styles.statLabel}>Vendidas</Text>
+        </View>
+        <View style={[styles.statBadge, styles.statBadgePendente]}>
+          <Text style={[styles.statNumber, styles.statNumberPendente]}>{totalPendentes}</Text>
+          <Text style={styles.statLabel}>Pendentes</Text>
+        </View>
+        <View style={[styles.statBadge, styles.statBadgeCancelada]}>
+          <Text style={[styles.statNumber, styles.statNumberCancelada]}>{totalCanceladas}</Text>
+          <Text style={styles.statLabel}>Canceladas</Text>
+        </View>
       </View>
 
       {loading ? (
@@ -295,11 +322,14 @@ export default function RelatorioScreen() {
             <Text style={styles.filterSectionTitle}>Situação da Solicitação</Text>
             <View style={styles.chipContainer}>
                 {['todos', 'pendente', 'vendida', 'cancelada'].map(status => (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         key={status}
                         style={[styles.chip, filtroStatus === status && styles.chipActive]}
                         onPress={() => setFiltroStatus(status)}
                     >
+                        {STATUS_DOT_COLOR[status] && (
+                          <View style={[styles.chipDot, { backgroundColor: STATUS_DOT_COLOR[status] }]} />
+                        )}
                         <Text style={[styles.chipText, filtroStatus === status && styles.chipTextActive]}>
                             {status === 'todos' ? 'Todos' : status.charAt(0).toUpperCase() + status.slice(1)}
                         </Text>
@@ -315,11 +345,17 @@ export default function RelatorioScreen() {
                     { id: 'semana', label: 'Últimos 7 dias' },
                     { id: 'mes', label: 'Últimos 30 dias' }
                 ].map(tempo => (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         key={tempo.id}
                         style={[styles.chip, filtroTempo === tempo.id && styles.chipActive]}
                         onPress={() => setFiltroTempo(tempo.id)}
                     >
+                        <Ionicons
+                          name="time-outline"
+                          size={14}
+                          color={filtroTempo === tempo.id ? c.primary : c.textMuted}
+                          style={{ marginRight: 6 }}
+                        />
                         <Text style={[styles.chipText, filtroTempo === tempo.id && styles.chipTextActive]}>
                             {tempo.label}
                         </Text>
@@ -338,236 +374,7 @@ export default function RelatorioScreen() {
         </View>
       </Modal>
 
+      <AppAlert {...alert} />
     </View>
   );
 }
-
-const getDynamicStyles = (isDarkMode) => {
-  const colors = {
-    background: isDarkMode ? '#313338' : '#F2F3F5',
-    text: isDarkMode ? '#F2F3F5' : '#111827',
-    textMuted: isDarkMode ? '#B5BAC1' : '#6B7280',
-    card: isDarkMode ? '#2B2D31' : '#FFFFFF',
-    border: isDarkMode ? '#1E1F22' : '#E5E7EB',
-    primary: '#5865F2',
-    primaryLight: isDarkMode ? 'rgba(88, 101, 242, 0.2)' : '#E0E7FF',
-    successBg: isDarkMode ? 'rgba(35, 165, 89, 0.2)' : '#DCFCE7',
-    successText: isDarkMode ? '#4ADE80' : '#166534',
-    dangerBg: isDarkMode ? 'rgba(218, 55, 60, 0.2)' : '#FEE2E2',
-    dangerText: isDarkMode ? '#F87171' : '#991B1B',
-    warningBg: isDarkMode ? 'rgba(254, 231, 92, 0.2)' : '#FEF9C3',
-    warningText: isDarkMode ? '#FDE047' : '#854D0E',
-  };
-
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-      paddingTop: Constants.statusBarHeight + 20,
-    },
-    headerRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        marginBottom: 10,
-    },
-    title: {
-      fontSize: 26,
-      fontWeight: '800',
-      color: colors.text,
-    },
-    btnAbrirFiltro: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: colors.primary,
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-    },
-    btnAbrirFiltroText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        marginLeft: 6,
-    },
-    resumoFiltro: {
-        paddingHorizontal: 20,
-        marginBottom: 15,
-    },
-    resumoTexto: {
-        color: colors.textMuted,
-        fontSize: 14,
-        fontStyle: 'italic',
-    },
-    list: { 
-        paddingHorizontal: 20,
-    },
-    solicitacaoItem: {
-      backgroundColor: colors.card,
-      borderColor: colors.border,
-      borderWidth: 1,
-      borderRadius: 12,
-      marginBottom: 15,
-      padding: 16,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: isDarkMode ? 0 : 0.05,
-      shadowRadius: 3,
-      elevation: isDarkMode ? 0 : 2,
-    },
-    itemCabecalho: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    solicitacaoProduto: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.text,
-      flex: 1,
-      marginRight: 10,
-    },
-    statusBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 6,
-      fontSize: 11,
-      fontWeight: 'bold',
-      overflow: 'hidden',
-    },
-    statusVendida: { backgroundColor: colors.successBg, color: colors.successText },
-    statusCancelada: { backgroundColor: colors.dangerBg, color: colors.dangerText },
-    statusPendente: { backgroundColor: colors.warningBg, color: colors.warningText },
-    
-    itemDetalhes: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        borderTopWidth: 1,
-        borderTopColor: colors.border,
-        paddingTop: 12,
-    },
-    detalheInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    detalheTexto: {
-        marginLeft: 6,
-        fontSize: 14,
-        color: colors.textMuted,
-        fontWeight: '500',
-    },
-    emptyContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 60,
-    },
-    listaVazia: {
-      marginTop: 15,
-      fontSize: 16,
-      color: colors.textMuted,
-      textAlign: 'center',
-    },
-    
-    // FAB (Floating Action Button) para o PDF
-    pdfFab: {
-        position: 'absolute',
-        bottom: 25,
-        right: 20,
-        backgroundColor: '#23A559',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 20,
-        borderRadius: 30,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
-    },
-    pdfButtonDisabled: { opacity: 0.5 },
-    pdfFabText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        fontSize: 16,
-        marginLeft: 8,
-    },
-
-    // ESTILOS DO BOTTOM SHEET DE FILTROS
-    modalOverlay: {
-        flex: 1,
-        justifyContent: 'flex-end',
-        backgroundColor: 'rgba(0,0,0,0.5)',
-    },
-    bottomSheet: {
-        backgroundColor: colors.background,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 24,
-        paddingBottom: 40,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 10,
-        elevation: 10,
-    },
-    sheetHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    sheetTitle: {
-        fontSize: 22,
-        fontWeight: 'bold',
-        color: colors.text,
-    },
-    filterSectionTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: colors.textMuted,
-        marginBottom: 12,
-        marginTop: 10,
-    },
-    chipContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginBottom: 10,
-    },
-    chip: {
-        backgroundColor: colors.card,
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-        marginRight: 10,
-        marginBottom: 10,
-    },
-    chipActive: {
-        backgroundColor: colors.primaryLight,
-        borderColor: colors.primary,
-    },
-    chipText: {
-        color: colors.textMuted,
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    chipTextActive: {
-        color: colors.primary,
-    },
-    btnAplicarFiltro: {
-        backgroundColor: colors.primary,
-        paddingVertical: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-        marginTop: 20,
-    },
-    btnAplicarText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        fontSize: 18,
-    }
-  });
-};
