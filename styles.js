@@ -273,6 +273,64 @@ export const getProdutoStyles = (isDarkMode) => {
       color: c.textMuted,
     },
 
+    // Carrossel de fotos
+    carrossel: { width: '100%', marginBottom: 20 },
+    carrosselMoldura: {
+      width: '100%',
+      height: 280,
+      borderRadius: 20,
+      overflow: 'hidden',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    carrosselSlide: { height: '100%', justifyContent: 'center', alignItems: 'center' },
+    carrosselImagem: { width: '100%', height: '100%' },
+    // Contador e pontinhos flutuam sobre a foto: leem bem em foto clara ou
+    // escura porque a pílula preta translúcida vai junto.
+    carrosselContador: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    carrosselContadorTexto: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    carrosselPontos: {
+      position: 'absolute',
+      bottom: 12,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+    },
+    carrosselPonto: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: 'rgba(255,255,255,0.5)',
+    },
+    carrosselPontoAtivo: { width: 18, backgroundColor: '#fff' },
+    miniaturas: { flexDirection: 'row', gap: 8, paddingTop: 10, paddingRight: 20 },
+    miniatura: {
+      width: 56,
+      height: 56,
+      borderRadius: 10,
+      overflow: 'hidden',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.border,
+      opacity: 0.6,
+    },
+    miniaturaAtiva: { borderColor: c.primary, borderWidth: 2, opacity: 1 },
+    miniaturaImagem: { width: '100%', height: '100%' },
+
     // Título + badge de estoque
     titleRow: { width: '100%', marginBottom: 20 },
     title: { fontSize: 24, fontWeight: '800', color: c.text, marginBottom: 8 },
@@ -291,12 +349,12 @@ export const getProdutoStyles = (isDarkMode) => {
     estoqueBadgeTextZerado: { color: c.dangerText },
 
     sectionTitle: {
-      width: '100%',
+      flexShrink: 1,
       fontSize: 13,
       fontWeight: 'bold',
       color: c.textMuted,
-      marginBottom: 12,
       textTransform: 'uppercase',
+      letterSpacing: 0.4,
     },
 
     // Seletor de cor × numeração (modelo Shopee)
@@ -345,18 +403,77 @@ export const getProdutoStyles = (isDarkMode) => {
     corChipImagem: { width: '100%', height: '100%' },
     corChipTexto: { fontSize: 13, fontWeight: '600', color: c.text, flexShrink: 1 },
 
+    // Cabeçalho de um bloco de opção: rótulo à esquerda, resumo à direita.
+    opcaoCabecalho: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 10,
+    },
+    opcaoResumo: { fontSize: 12, fontWeight: '700', color: c.textMuted },
+    opcaoResumoVazio: { color: c.danger },
+
+    // Grade fechada de numerações (36 a 45). O alvo de toque tem 48px de
+    // altura para continuar confortável no dedo mesmo com os chips pequenos.
+    tamanhoGrade: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     tamanhoChip: {
-      minWidth: 56,
+      width: 54,
+      height: 48,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: c.background,
-      borderWidth: 1,
+      borderWidth: 1.5,
       borderColor: c.border,
-      borderRadius: 10,
-      paddingVertical: 12,
-      paddingHorizontal: 14,
+      borderRadius: 12,
     },
     tamanhoChipTexto: { fontSize: 15, fontWeight: '700', color: c.text },
+
+    // Tem par para vender: verde, o único estado com cor cheia na grade.
+    tamanhoChipDisponivel: { backgroundColor: c.successBg, borderColor: c.success },
+    tamanhoChipTextoDisponivel: { color: c.successText },
+
+    // Existe no modelo, mas zerou: apagado, ainda legível e ainda clicável.
+    tamanhoChipEsgotado: { backgroundColor: c.badgeBg, borderColor: c.border, opacity: 0.5 },
+    tamanhoChipTextoEsgotado: { color: c.textMuted, textDecorationLine: 'line-through' },
+
+    // A loja não trabalha essa numeração aqui: o mais apagado de todos, só
+    // para dar a noção da grade inteira. Não recebe toque.
+    tamanhoChipIndisponivel: { backgroundColor: 'transparent', borderColor: c.border, opacity: 0.3 },
+    tamanhoChipTextoIndisponivel: { color: c.textMuted, fontWeight: '600' },
+
+    // Selecionado vence todos os outros estados: preenchido na cor da marca.
+    tamanhoChipAtivo: { backgroundColor: c.primary, borderColor: c.primary },
+    tamanhoChipTextoAtivo: { color: '#fff' },
+
+    // Selinho com as últimas unidades, no canto do chip verde.
+    tamanhoChipSelo: {
+      position: 'absolute',
+      top: -6,
+      right: -6,
+      minWidth: 20,
+      height: 20,
+      paddingHorizontal: 4,
+      borderRadius: 10,
+      backgroundColor: c.warning,
+      borderWidth: 2,
+      borderColor: c.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tamanhoChipSeloTexto: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: isDarkMode ? '#1E1F22' : '#FFFFFF',
+    },
+
+    // Legenda das cores da grade
+    legenda: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 12 },
+    legendaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legendaPonto: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
+    legendaPontoDisponivel: { backgroundColor: c.successBg, borderColor: c.success },
+    legendaPontoEsgotado: { backgroundColor: c.badgeBg, borderColor: c.border, opacity: 0.5 },
+    legendaPontoIndisponivel: { backgroundColor: 'transparent', borderColor: c.border, opacity: 0.4 },
+    legendaTexto: { fontSize: 11, color: c.textMuted, fontWeight: '600' },
 
     // Esgotado continua clicável de propósito: o vendedor precisa ver que a
     // numeração existe no modelo, só que sem par na prateleira.
@@ -436,28 +553,90 @@ export const getProdutoStyles = (isDarkMode) => {
     aguardandoTexto: { fontSize: 12, color: c.danger, fontStyle: 'italic', marginTop: 5 },
 
     // Outros produtos disponíveis
+    secaoCabecalho: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    secaoContagem: {
+      backgroundColor: c.badgeBg,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 10,
+    },
+    secaoContagemTexto: { fontSize: 11, fontWeight: '800', color: c.textMuted },
+    secaoSubtitulo: { width: '100%', fontSize: 12, color: c.textMuted, marginBottom: 12 },
+
     similaresContainer: { width: '100%', marginTop: 10 },
-    similaresList: { paddingRight: 20 },
+    similaresList: { paddingRight: 20, paddingBottom: 4 },
     similarCard: {
-      width: 130,
+      width: 156,
       marginRight: 12,
       backgroundColor: c.card,
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: c.border,
       overflow: 'hidden',
     },
     similarImageWrapper: {
       width: '100%',
-      height: 90,
+      height: 118,
       backgroundColor: c.background,
       justifyContent: 'center',
       alignItems: 'center',
     },
-    similarInfo: { padding: 10 },
-    similarNome: { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 4 },
-    similarEstoque: { fontSize: 12, color: c.textMuted },
-    similaresVazio: { color: c.textMuted, fontSize: 14, fontStyle: 'italic' },
+    // Selo de estoque flutuando sobre a foto: é a informação que decide se
+    // vale a pena abrir o produto, então vem antes do nome na leitura.
+    similarSelo: {
+      position: 'absolute',
+      top: 8,
+      left: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 10,
+      backgroundColor: c.successBg,
+    },
+    similarSeloTexto: { fontSize: 10, fontWeight: '800', color: c.successText },
+    similarSeloBaixo: { backgroundColor: c.warningBg },
+    similarSeloTextoBaixo: { color: c.warningText },
+
+    similarInfo: { padding: 10, gap: 6 },
+    similarNome: { fontSize: 13, fontWeight: '700', color: c.text, lineHeight: 17 },
+    similarMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+    similarTag: {
+      backgroundColor: c.badgeBg,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      maxWidth: '100%',
+    },
+    similarTagTexto: { fontSize: 11, fontWeight: '600', color: c.textMuted },
+
+    similaresCarregando: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
+    similaresCarregandoTexto: { fontSize: 12, color: c.textMuted },
+    similaresVazio: {
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 28,
+      paddingHorizontal: 20,
+      backgroundColor: c.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    similaresVazioTexto: {
+      marginTop: 8,
+      color: c.textMuted,
+      fontSize: 13,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
   });
 };
 

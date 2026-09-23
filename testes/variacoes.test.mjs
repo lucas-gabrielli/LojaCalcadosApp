@@ -6,6 +6,8 @@ import {
   normalizarCor,
   agruparPorCor,
   tamanhosDaCor,
+  gradeDeTamanhos,
+  contarTamanhosDisponiveis,
   encontrarVariacao,
   escolhaInicial,
   tamanhoAoTrocarCor,
@@ -123,6 +125,84 @@ test('a quantidade nunca desce abaixo de 1 quando há estoque', () => {
 test('sem estoque, a quantidade é zero', () => {
   assert.equal(limitarQuantidade(1, 0), 0);
   assert.equal(limitarQuantidade(1, undefined), 0);
+});
+
+// --- gradeDeTamanhos --------------------------------------------------------
+
+test('a grade vai de 36 a 45 mesmo quando quase nada está cadastrado', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Preto');
+  assert.equal(grade.length, 10);
+  assert.deepEqual(grade.map((i) => i.chave), ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']);
+});
+
+test('numeração com par vira disponível; com pouco par, baixo', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Preto');
+  const porChave = Object.fromEntries(grade.map((i) => [i.chave, i]));
+  // v1: Preto 40, estoque 2 → dentro do limite de estoque baixo.
+  assert.equal(porChave['40'].situacao, 'baixo');
+  assert.equal(porChave['40'].estoque, 2);
+  assert.equal(porChave['40'].cadastrado, true);
+
+  const branco = gradeDeTamanhos(VARIACOES, 'Branco');
+  // v3: Branco 41, estoque 5 → acima do limite.
+  assert.equal(branco.find((i) => i.chave === '41').situacao, 'disponivel');
+});
+
+test('numeração cadastrada mas zerada fica esgotada, e não indisponível', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Preto');
+  const trinta9 = grade.find((i) => i.chave === '39');
+  assert.equal(trinta9.situacao, 'esgotado');
+  assert.equal(trinta9.cadastrado, true);
+  assert.equal(trinta9.estoque, 0);
+});
+
+test('numeração que a loja não trabalha fica indisponível e sem variação', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Preto');
+  const quarenta5 = grade.find((i) => i.chave === '45');
+  assert.equal(quarenta5.situacao, 'indisponivel');
+  assert.equal(quarenta5.cadastrado, false);
+  assert.equal(quarenta5.variacao, null);
+  assert.equal(quarenta5.estoque, 0);
+});
+
+test('numeração fora da faixa não some: entra no fim da grade', () => {
+  const variacoes = [
+    { id: 'a', cor: 'Preto', tamanho: 46, estoque: 4 },
+    { id: 'b', cor: 'Preto', tamanho: 35, estoque: 1 },
+    { id: 'c', cor: 'Preto', tamanho: 40, estoque: 1 },
+  ];
+  const grade = gradeDeTamanhos(variacoes, 'Preto');
+  assert.deepEqual(grade.slice(10).map((i) => i.chave), ['35', '46']);
+  assert.equal(grade.find((i) => i.chave === '46').situacao, 'disponivel');
+});
+
+test('cadastro duplicado da mesma numeração soma o estoque', () => {
+  const variacoes = [
+    { id: 'a', cor: 'Preto', tamanho: 40, estoque: 3 },
+    { id: 'b', cor: 'Preto', tamanho: 40, estoque: 4 },
+  ];
+  const item = gradeDeTamanhos(variacoes, 'Preto').find((i) => i.chave === '40');
+  assert.equal(item.estoque, 7);
+  assert.equal(item.situacao, 'disponivel');
+});
+
+test('a faixa da grade é configurável', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Preto', { minimo: 38, maximo: 40 });
+  assert.deepEqual(grade.map((i) => i.chave), ['38', '39', '40']);
+});
+
+test('cor sem nenhuma variação ainda mostra a grade inteira apagada', () => {
+  const grade = gradeDeTamanhos(VARIACOES, 'Azul');
+  assert.equal(grade.length, 10);
+  assert.ok(grade.every((i) => i.situacao === 'indisponivel'));
+});
+
+test('contarTamanhosDisponiveis conta só quem tem par para vender', () => {
+  // Preto: 40 com 2 pares (baixo) e 39 zerado.
+  assert.equal(contarTamanhosDisponiveis(gradeDeTamanhos(VARIACOES, 'Preto')), 1);
+  assert.equal(contarTamanhosDisponiveis(gradeDeTamanhos(VARIACOES, 'Azul')), 0);
+  assert.equal(contarTamanhosDisponiveis([]), 0);
+  assert.equal(contarTamanhosDisponiveis(undefined), 0);
 });
 
 // --- descreverItem / detalhesDoItem -----------------------------------------

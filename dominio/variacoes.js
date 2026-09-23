@@ -8,7 +8,17 @@
  * — a tela só desenha o resultado.
  */
 
+import { classificarEstoque } from './estoque.js';
+import { capaDaCor } from './galeria.js';
+
 export const COR_PADRAO = 'Única';
+
+// A grade que a loja trabalha. A tela mostra TODAS estas numerações mesmo que
+// o modelo não tenha nenhum par delas: o vendedor precisa enxergar num piscar
+// de olhos o que existe e o que não existe, sem ficar procurando um número que
+// simplesmente não aparece na lista.
+export const TAMANHO_MINIMO = 36;
+export const TAMANHO_MAXIMO = 45;
 
 /** Variação sem cor cadastrada não some da tela: vira "Única". */
 export function normalizarCor(cor) {
@@ -42,14 +52,17 @@ export function agruparPorCor(variacoes) {
       porCor.set(cor, { cor, imagemUrl: null, estoqueTotal: 0, tamanhos: [] });
     }
     const grupo = porCor.get(cor);
-    // A primeira variação da cor que tiver foto é quem representa a cor.
-    if (!grupo.imagemUrl && variacao.imagemUrl) grupo.imagemUrl = variacao.imagemUrl;
     grupo.estoqueTotal += Number(variacao.estoque) || 0;
     grupo.tamanhos.push({ ...variacao, cor });
   });
 
   const grupos = Array.from(porCor.values());
-  grupos.forEach((grupo) => grupo.tamanhos.sort((a, b) => compararTamanhos(a.tamanho, b.tamanho)));
+  grupos.forEach((grupo) => {
+    grupo.tamanhos.sort((a, b) => compararTamanhos(a.tamanho, b.tamanho));
+    // A primeira foto que aparecer na cor representa a cor no chip — venha ela
+    // do campo antigo `imagemUrl` ou da lista nova `imagens`.
+    grupo.imagemUrl = capaDaCor(grupo.tamanhos);
+  });
   return grupos;
 }
 
@@ -58,6 +71,67 @@ export function tamanhosDaCor(variacoes, cor) {
   const alvo = normalizarCor(cor);
   const grupo = agruparPorCor(variacoes).find((g) => g.cor === alvo);
   return grupo ? grupo.tamanhos : [];
+}
+
+/**
+ * A grade fechada de numerações de uma cor: de 36 a 45 sempre, cadastradas ou
+ * não, mais qualquer numeração fora dessa faixa que exista no estoque (35, 46,
+ * "P 36-38") — essas entram no fim para não sumirem do catálogo.
+ *
+ * A situação de cada numeração é o que a tela pinta:
+ *   'disponivel'   — tem par na prateleira (destaque verde)
+ *   'baixo'        — tem par, mas está acabando (verde + aviso da quantidade)
+ *   'esgotado'     — a numeração existe no modelo, mas zerou
+ *   'indisponivel' — a loja não trabalha essa numeração neste modelo/cor
+ *
+ * @returns {Array<{chave: string, tamanho: any, variacao: object|null,
+ *                  estoque: number, cadastrado: boolean, situacao: string}>}
+ */
+export function gradeDeTamanhos(variacoes, cor, opcoes = {}) {
+  const { minimo = TAMANHO_MINIMO, maximo = TAMANHO_MAXIMO } = opcoes;
+
+  const porTamanho = new Map();
+  tamanhosDaCor(variacoes, cor).forEach((variacao) => {
+    const chave = String(variacao.tamanho);
+    const estoque = Number(variacao.estoque) || 0;
+    const existente = porTamanho.get(chave);
+    // Cadastro duplicado (duas variações da mesma cor e numeração) soma o
+    // estoque em vez de esconder metade dele.
+    if (existente) existente.estoque += estoque;
+    else porTamanho.set(chave, { variacao, estoque });
+  });
+
+  const faixaFixa = [];
+  for (let numero = minimo; numero <= maximo; numero += 1) faixaFixa.push(String(numero));
+
+  const foraDaFaixa = Array.from(porTamanho.keys()).filter((chave) => !faixaFixa.includes(chave));
+  foraDaFaixa.sort(compararTamanhos);
+
+  return [...faixaFixa, ...foraDaFaixa].map((chave) => {
+    const encontrado = porTamanho.get(chave) || null;
+    const estoque = encontrado ? encontrado.estoque : 0;
+    return {
+      chave,
+      tamanho: encontrado ? encontrado.variacao.tamanho : Number(chave),
+      variacao: encontrado ? encontrado.variacao : null,
+      estoque,
+      cadastrado: Boolean(encontrado),
+      situacao: situacaoDoTamanho(encontrado, estoque),
+    };
+  });
+}
+
+function situacaoDoTamanho(encontrado, estoque) {
+  if (!encontrado) return 'indisponivel';
+  const classe = classificarEstoque(estoque);
+  if (classe === 'zerado') return 'esgotado';
+  if (classe === 'baixo') return 'baixo';
+  return 'disponivel';
+}
+
+/** Quantas numerações da grade têm par para vender agora. */
+export function contarTamanhosDisponiveis(grade) {
+  return (grade || []).filter((item) => item.situacao === 'disponivel' || item.situacao === 'baixo').length;
 }
 
 /** A variação exata de uma combinação cor + tamanho, ou null. */
