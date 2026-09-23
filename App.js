@@ -53,6 +53,18 @@ function InicioStack() {
   );
 }
 
+// A Sacola precisa da sua propria pilha: sem ela, abrir o detalhe de um produto
+// obrigava a pular para a aba Inicio, o que trocava a aba destacada na barra
+// flutuante e fazia o "voltar" cair no Inicio em vez de voltar para a sacola.
+function SacolaStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Sacola" component={SacolaScreen} />
+      <Stack.Screen name="Produto" component={ProdutoScreen} />
+    </Stack.Navigator>
+  );
+}
+
 function MainNavigator() {
   const { isDarkMode, isBiometricEnabled } = useContext(ThemeContext);
   const appState = useRef(AppState.currentState);
@@ -79,7 +91,7 @@ function MainNavigator() {
           tabBar={(props) => <FloatingTabBar {...props} />}
         >
           <Tab.Screen name="Início" component={InicioStack} />
-          <Tab.Screen name="Sacola" component={SacolaScreen} />
+          <Tab.Screen name="Sacola" component={SacolaStack} />
           <Tab.Screen name="Solicitações" component={SolicitacoesScreen} />
         </Tab.Navigator>
       </NavigationContainer>

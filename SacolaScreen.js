@@ -47,11 +47,12 @@ export default function SacolaScreen({ navigation }) {
     await AsyncStorage.setItem('@sacola_pedidos', JSON.stringify(novaSacola));
   };
 
-  // A Sacola é uma aba, não uma tela da pilha do Início: para chegar no
-  // detalhe do produto é preciso entrar na aba Início e empilhar lá dentro.
+  // O detalhe do produto vive na própria pilha da Sacola (ver SacolaStack no
+  // App.js). Empilhar aqui mantém a aba Sacola destacada na barra flutuante e
+  // faz o "voltar" da tela de produto cair de volta na sacola.
   const abrirProduto = (qrCode) => {
     if (!qrCode) return;
-    navigation.navigate('Início', { screen: 'Produto', params: { qrCode } });
+    navigation.navigate('Produto', { qrCode });
   };
 
   const enviarPedidos = async () => {

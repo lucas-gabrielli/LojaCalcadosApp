@@ -18,9 +18,12 @@ const TEMPO_FECHAR = 180;
  * - O fundo só aceita toque depois de abrir, senão o mesmo toque que abriu o
  *   menu era reentregue a ele e fechava na hora.
  *
+ * `instantaneo` pula a animação e o atraso do fundo: usado na ida-e-volta por um
+ * item do menu, onde animar faria o menu parecer que fechou e abriu de novo.
+ *
  * sections: [{ title, items: [{ icon, label, onPress }] }]
  */
-export default function SideMenu({ visible, onClose, nome, email, sections, onLogout }) {
+export default function SideMenu({ visible, instantaneo, onClose, nome, email, sections, onLogout }) {
   const { isDarkMode } = useContext(ThemeContext);
   const styles = getSideMenuStyles(isDarkMode);
   const c = colors(isDarkMode);
@@ -34,21 +37,38 @@ export default function SideMenu({ visible, onClose, nome, email, sections, onLo
   useEffect(() => {
     if (visible) {
       setMontado(true);
+      // Já nasce no lugar: nada de painel deslizando na volta de uma tela.
+      if (instantaneo) {
+        progresso.setValue(1);
+        return undefined;
+      }
       Animated.timing(progresso, {
         toValue: 1,
         duration: TEMPO_ABRIR,
         useNativeDriver: true,
       }).start();
-    } else {
-      Animated.timing(progresso, {
-        toValue: 0,
-        duration: TEMPO_FECHAR,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) setMontado(false);
-      });
+      return undefined;
     }
-  }, [visible]);
+
+    if (instantaneo) {
+      progresso.setValue(0);
+      setMontado(false);
+      return undefined;
+    }
+
+    Animated.timing(progresso, {
+      toValue: 0,
+      duration: TEMPO_FECHAR,
+      useNativeDriver: true,
+    }).start();
+
+    // O desmonte NÃO pode depender do callback `finished`: quando a animação é
+    // interrompida (navegar para outra tela no meio do fechamento) ele nunca
+    // chega, e o Modal ficava montado com o fundo escuro por cima de tudo, sem
+    // painel e sem toque que o fechasse — a tela travava de vez.
+    const id = setTimeout(() => setMontado(false), TEMPO_FECHAR);
+    return () => clearTimeout(id);
+  }, [visible, instantaneo]);
 
   const [fundoAtivo, setFundoAtivo] = useState(false);
   useEffect(() => {
@@ -56,9 +76,17 @@ export default function SideMenu({ visible, onClose, nome, email, sections, onLo
       setFundoAtivo(false);
       return undefined;
     }
+    // A espera existe só para o toque que abriu o menu não ser reentregue ao
+    // fundo. Na reabertura instantânea não houve toque nenhum nesta tela, e
+    // esperar deixaria o menu surdo por um quarto de segundo — exatamente a
+    // sensação de tela travada.
+    if (instantaneo) {
+      setFundoAtivo(true);
+      return undefined;
+    }
     const id = setTimeout(() => setFundoAtivo(true), TEMPO_ABRIR + 30);
     return () => clearTimeout(id);
-  }, [visible]);
+  }, [visible, instantaneo]);
 
   const translateX = progresso.interpolate({ inputRange: [0, 1], outputRange: [larguraPainel, 0] });
 
@@ -67,6 +95,9 @@ export default function SideMenu({ visible, onClose, nome, email, sections, onLo
       <Pressable
         style={[StyleSheet.absoluteFill, styles.backdrop]}
         onPress={fundoAtivo ? onClose : undefined}
+        // Sem isto o fundo engole o toque mesmo quando não tem o que fazer com
+        // ele, e a tela parece travada durante a animação.
+        pointerEvents={fundoAtivo ? 'auto' : 'none'}
         accessibilityLabel="Fechar menu"
       />
 

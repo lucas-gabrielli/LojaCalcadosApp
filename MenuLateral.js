@@ -9,6 +9,7 @@ import { ESTADO_INICIAL, reduzir } from './dominio/menuLateral';
 
 const MenuLateralContext = createContext({
   aberto: false,
+  instantaneo: false,
   abrirPeloAvatar: () => {},
   fechar: () => {},
   aoFocarInicio: () => {},
@@ -33,8 +34,16 @@ export function MenuLateralProvider({ children }) {
   const sairDaConta = useCallback(() => despachar('sairDaConta'), []);
 
   const valor = useMemo(
-    () => ({ aberto: estado.aberto, abrirPeloAvatar, fechar, escolherItem, aoFocarInicio, sairDaConta }),
-    [estado.aberto, abrirPeloAvatar, fechar, escolherItem, aoFocarInicio, sairDaConta]
+    () => ({
+      aberto: estado.aberto,
+      instantaneo: estado.instantaneo,
+      abrirPeloAvatar,
+      fechar,
+      escolherItem,
+      aoFocarInicio,
+      sairDaConta,
+    }),
+    [estado.aberto, estado.instantaneo, abrirPeloAvatar, fechar, escolherItem, aoFocarInicio, sairDaConta]
   );
 
   return <MenuLateralContext.Provider value={valor}>{children}</MenuLateralContext.Provider>;
@@ -49,11 +58,11 @@ export function MenuLateralProvider({ children }) {
  * estático). Dentro da tela, `position:absolute` se resolve contra a própria
  * tela e o desenho é previsível.
  *
- * A barra flutuante fica por cima do conteúdo da tela, então ela se esconde
- * sozinha enquanto o menu está aberto (ver FloatingTabBar).
+ * O menu roda dentro de um Modal, que fica acima de tudo — inclusive da barra
+ * flutuante. Não é preciso escondê-la.
  */
 export function MenuLateralOverlay({ navegar }) {
-  const { aberto, fechar, escolherItem, sairDaConta } = useMenuLateral();
+  const { aberto, instantaneo, fechar, escolherItem, sairDaConta } = useMenuLateral();
   const { alert, showAlert } = useAppAlert();
 
   const usuario = auth.currentUser;
@@ -104,6 +113,7 @@ export function MenuLateralOverlay({ navegar }) {
     <>
       <SideMenu
         visible={aberto}
+        instantaneo={instantaneo}
         onClose={fechar}
         nome={nome}
         email={usuario?.email || ''}

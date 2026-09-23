@@ -36,6 +36,12 @@ export default function HomeScreen({ navigation }) {
 
   // Quem entrou numa tela PELO MENU volta com o menu já aberto. Quem entrou
   // por um atalho da grade, não. A decisão é de dominio/menuLateral.js.
+  //
+  // O foco chega no INÍCIO da transição de volta, e é aí mesmo que o menu tem
+  // de reaparecer: ele cobre a tela inteira, então o usuário vê o menu de
+  // volta na hora, sem esperar a pilha terminar de animar. Isso só é seguro
+  // porque essa reabertura é instantânea (ver `instantaneo` no SideMenu):
+  // não há animação nem timer disputando a transição.
   useFocusEffect(
     useCallback(() => {
       aoFocarInicio();

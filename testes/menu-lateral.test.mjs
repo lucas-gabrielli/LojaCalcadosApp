@@ -11,14 +11,15 @@ import {
   reduzir,
 } from '../dominio/menuLateral.js';
 
-test('começa fechado e sem reabertura agendada', () => {
-  assert.deepEqual(ESTADO_INICIAL, { aberto: false, reabrirAoVoltar: false });
+test('começa fechado, sem reabertura agendada e animando', () => {
+  assert.deepEqual(ESTADO_INICIAL, { aberto: false, reabrirAoVoltar: false, instantaneo: false });
 });
 
-test('avatar abre o menu sem agendar reabertura', () => {
+test('avatar abre o menu com animação e sem agendar reabertura', () => {
   const estado = abrirPeloAvatar(ESTADO_INICIAL);
   assert.equal(estado.aberto, true);
   assert.equal(estado.reabrirAoVoltar, false);
+  assert.equal(estado.instantaneo, false, 'abrir pelo avatar é um gesto novo: anima');
 });
 
 test('abrir pelo avatar e voltar de uma tela NÃO reabre o menu', () => {
@@ -32,6 +33,24 @@ test('escolher um item fecha o menu e agenda a reabertura', () => {
   const estado = escolherItem(abrirPeloAvatar(ESTADO_INICIAL));
   assert.equal(estado.aberto, false);
   assert.equal(estado.reabrirAoVoltar, true);
+});
+
+test('a ida-e-volta pelo menu não anima em nenhuma das duas pontas', () => {
+  // O usuário reclamou de ver o menu "fechando e abrindo" com atraso. A ida e
+  // a volta são um movimento só: o menu some junto com a tela e reaparece já
+  // montado.
+  const aoSair = escolherItem(abrirPeloAvatar(ESTADO_INICIAL));
+  assert.equal(aoSair.instantaneo, true, 'sair pelo item não anima o fechamento');
+
+  const aoVoltar = aoFocarInicio(aoSair);
+  assert.equal(aoVoltar.instantaneo, true, 'voltar mostra o menu já aberto');
+});
+
+test('fechar de propósito volta a animar', () => {
+  // Depois de uma reabertura instantânea, fechar no X ou no fundo é um gesto
+  // do usuário e merece a animação de volta.
+  const reaberto = aoFocarInicio(escolherItem(abrirPeloAvatar(ESTADO_INICIAL)));
+  assert.equal(fechar(reaberto).instantaneo, false);
 });
 
 test('ao voltar para o Início o menu reabre uma única vez', () => {
