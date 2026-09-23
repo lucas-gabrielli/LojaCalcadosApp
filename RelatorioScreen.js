@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useContext } from 'react';
 import {
   Text,
   View,
+  Image,
   FlatList,
   ActivityIndicator,
   Pressable,
@@ -23,21 +24,26 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
+import { buscarDetalhesDeVariacoes } from './dados/estoqueRepo';
+import { detalhesDoItem } from './dominio/variacoes';
+import { FILTRO_TODOS, filtrarPorStatus, contarPorStatus, alternarStatus } from './dominio/relatorio';
 import { ThemeContext } from './ThemeContext';
 import { getRelatorioStyles, colors } from './styles';
 import AppAlert, { useAppAlert } from './AppAlert';
 
 const gerarConteudoHTML = (solicitacoes, filtroTempo, filtroStatus) => {
   let totalSolicitacoes = solicitacoes.length;
-  
+
   const mapTempo = { dia: 'Diário', semana: 'Últimos 7 dias', mes: 'Últimos 30 dias', todos: 'Desde o início' };
   const mapStatus = { todos: 'Todos os Status', pendente: 'Apenas Pendentes', vendida: 'Apenas Vendidas', cancelada: 'Apenas Devolvidas' };
-  
+
   let tableRows = `
     <tr style="background-color: #5865F2; color: white;">
       <th style="padding: 10px; border: 1px solid #ddd;">Data/Hora</th>
       <th style="padding: 10px; border: 1px solid #ddd;">Produto</th>
+      <th style="padding: 10px; border: 1px solid #ddd;">Cor</th>
       <th style="padding: 10px; border: 1px solid #ddd;">Tam</th>
+      <th style="padding: 10px; border: 1px solid #ddd;">Qtd</th>
       <th style="padding: 10px; border: 1px solid #ddd;">Status</th>
     </tr>
   `;
@@ -45,12 +51,15 @@ const gerarConteudoHTML = (solicitacoes, filtroTempo, filtroStatus) => {
   solicitacoes.forEach(sol => {
     let corStatus = sol.status === 'vendida' ? '#23A559' : sol.status === 'cancelada' ? '#DA373C' : '#FEE75C';
     let corTextoStatus = sol.status === 'pendente' ? '#000' : '#fff';
-    
+    const detalhes = detalhesDoItem(sol);
+
     tableRows += `
       <tr>
         <td style="padding: 10px; border: 1px solid #ddd;">${sol.dataSolicitacaoFormatada}</td>
-        <td style="padding: 10px; border: 1px solid #ddd;">${sol.nomeProduto}</td>
-        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${sol.tamanho}</td>
+        <td style="padding: 10px; border: 1px solid #ddd;">${detalhes.nome}</td>
+        <td style="padding: 10px; border: 1px solid #ddd;">${detalhes.cor}</td>
+        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${detalhes.tamanho ?? '-'}</td>
+        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${sol.quantidade ?? 1}</td>
         <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">
           <span style="background-color: ${corStatus}; color: ${corTextoStatus}; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase;">
             ${sol.status || 'N/A'}
@@ -91,11 +100,14 @@ const gerarConteudoHTML = (solicitacoes, filtroTempo, filtroStatus) => {
 export default function RelatorioScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [solicitacoes, setSolicitacoes] = useState([]);
+  // Foto e QR Code por variação, para registros gravados antes de a solicitação
+  // passar a carregar a foto do tênis junto.
+  const [detalhesPorVariacao, setDetalhesPorVariacao] = useState({});
   const isFocused = useIsFocused();
 
   // ESTADOS DOS FILTROS
   const [filtroTempo, setFiltroTempo] = useState('todos');
-  const [filtroStatus, setFiltroStatus] = useState('todos');
+  const [filtroStatus, setFiltroStatus] = useState(FILTRO_TODOS);
   const [modalFiltroVisible, setModalFiltroVisible] = useState(false);
 
   const [isGerandoPDF, setIsGerandoPDF] = useState(false);
@@ -107,19 +119,22 @@ export default function RelatorioScreen({ navigation }) {
 
   const STATUS_DOT_COLOR = { pendente: c.warning, vendida: c.success, cancelada: c.danger };
 
+  // A busca traz o período inteiro, sem recortar por status: quem recorta é o
+  // domínio, logo abaixo. Assim o placar do topo continua mostrando os três
+  // números verdadeiros mesmo com um status selecionado.
   const fetchSolicitacoes = async () => {
     setLoading(true);
     try {
       const solicitacoesRef = collection(db, 'solicitacoes');
-      const usuarioLogado = auth.currentUser; 
-      
+      const usuarioLogado = auth.currentUser;
+
       if (!usuarioLogado) {
         setLoading(false); return;
       }
 
       const now = new Date();
       let dataInicio = null;
-      
+
       if (filtroTempo === 'dia') {
         dataInicio = new Date(now);
         dataInicio.setHours(0, 0, 0, 0);
@@ -133,32 +148,35 @@ export default function RelatorioScreen({ navigation }) {
 
       // MONTANDO A QUERY DINAMICAMENTE
       let condicoes = [where('usuario_email', '==', usuarioLogado.email)];
-      
-      // Se houver filtro de status, adiciona na query
-      if (filtroStatus !== 'todos') {
-        condicoes.push(where('status', '==', filtroStatus));
-      }
-      
+
       // Se houver filtro de tempo, adiciona na query
       if (dataInicio) {
         condicoes.push(where('dataSolicitacao', '>=', Timestamp.fromDate(dataInicio)));
       }
-      
+
       // Sempre ordena por data (mais recente primeiro)
       condicoes.push(orderBy('dataSolicitacao', 'desc'));
 
       const q = query(solicitacoesRef, ...condicoes);
       const querySnapshot = await getDocs(q);
-      
+
       const listaSolicitacoes = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        const dataFormatada = data.dataSolicitacao 
+        const dataFormatada = data.dataSolicitacao
           ? new Date(data.dataSolicitacao.seconds * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
           : '--/--/----';
         listaSolicitacoes.push({ id: doc.id, ...data, dataSolicitacaoFormatada: dataFormatada });
       });
       setSolicitacoes(listaSolicitacoes);
+
+      const faltantes = listaSolicitacoes
+        .filter((s) => !s.imagemUrl || !s.qrCode)
+        .map((s) => s.variacao_id);
+      if (faltantes.length > 0) {
+        const detalhes = await buscarDetalhesDeVariacoes(faltantes);
+        setDetalhesPorVariacao((atual) => ({ ...atual, ...detalhes }));
+      }
     } catch (e) {
       console.error("Erro ao buscar solicitações: ", e);
       showAlert({ type: 'danger', title: 'Erro', message: 'Não foi possível carregar o relatório. Verifique o console para criar o Índice no Firebase.', actions: [{ label: 'OK' }] });
@@ -167,20 +185,28 @@ export default function RelatorioScreen({ navigation }) {
     }
   };
 
+  // O status saiu daqui de propósito: trocar de status agora só refiltra o que
+  // já está na memória, sem uma nova ida ao Firestore a cada toque no placar.
   useEffect(() => {
     if (isFocused) {
       fetchSolicitacoes();
     }
-  }, [isFocused, filtroTempo, filtroStatus]);
+  }, [isFocused, filtroTempo]);
+
+  const contagem = useMemo(() => contarPorStatus(solicitacoes), [solicitacoes]);
+  const solicitacoesFiltradas = useMemo(
+    () => filtrarPorStatus(solicitacoes, filtroStatus),
+    [solicitacoes, filtroStatus]
+  );
 
   const handleGerarPDF = async () => {
-    if (solicitacoes.length === 0) {
+    if (solicitacoesFiltradas.length === 0) {
       showAlert({ type: 'warning', title: 'Relatório Vazio', message: 'Não há dados para gerar um PDF com os filtros atuais.', actions: [{ label: 'OK' }] });
       return;
     }
     setIsGerandoPDF(true);
     try {
-      const html = gerarConteudoHTML(solicitacoes, filtroTempo, filtroStatus);
+      const html = gerarConteudoHTML(solicitacoesFiltradas, filtroTempo, filtroStatus);
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
@@ -205,31 +231,89 @@ export default function RelatorioScreen({ navigation }) {
     return styles.statusPendente;
   };
 
-  const renderItemSolicitacao = ({ item }) => (
-    <View style={styles.solicitacaoItem}>
-      <View style={styles.itemCabecalho}>
-        <Text style={styles.solicitacaoProduto} numberOfLines={1}>{item.nomeProduto}</Text>
-        <Text style={[styles.statusBadge, getStatusCor(item.status)]}>
-          {item.status ? item.status.toUpperCase() : 'N/A'}
-        </Text>
-      </View>
-      
-      <View style={styles.itemDetalhes}>
-        <View style={styles.detalheInfo}>
-            <Ionicons name="resize-outline" size={16} color={isDarkMode ? '#aaa' : '#666'} />
-            <Text style={styles.detalheTexto}>Tam: {item.tamanho}</Text>
-        </View>
-        <View style={styles.detalheInfo}>
-            <Ionicons name="time-outline" size={16} color={isDarkMode ? '#aaa' : '#666'} />
-            <Text style={styles.detalheTexto}>{item.dataSolicitacaoFormatada}</Text>
-        </View>
-      </View>
-    </View>
-  );
+  const abrirProduto = (qrCode) => {
+    if (!qrCode) return;
+    navigation.navigate('Produto', { qrCode });
+  };
 
-  const totalVendidas = solicitacoes.filter((s) => s.status === 'vendida').length;
-  const totalPendentes = solicitacoes.filter((s) => s.status === 'pendente').length;
-  const totalCanceladas = solicitacoes.filter((s) => s.status === 'cancelada').length;
+  const renderItemSolicitacao = ({ item }) => {
+    const { nome, cor, tamanho } = detalhesDoItem(item);
+    const complemento = detalhesPorVariacao[item.variacao_id] || {};
+    const imagemUrl = item.imagemUrl || complemento.imagemUrl;
+    const qrCode = item.qrCode || complemento.qrCode;
+    const quantidade = Number(item.quantidade) || 1;
+
+    return (
+      <TouchableOpacity
+        style={styles.solicitacaoItem}
+        onPress={() => abrirProduto(qrCode)}
+        disabled={!qrCode}
+        accessibilityLabel={`Abrir detalhes de ${nome}`}
+      >
+        <View style={styles.itemCabecalho}>
+          <View style={styles.itemThumb}>
+            {imagemUrl ? (
+              <Image source={{ uri: imagemUrl }} style={styles.itemThumbImagem} resizeMode="cover" />
+            ) : (
+              <Ionicons name="footsteps-outline" size={24} color={isDarkMode ? '#555' : '#ccc'} />
+            )}
+          </View>
+
+          <View style={styles.itemTextos}>
+            <Text style={styles.solicitacaoProduto} numberOfLines={2}>{nome}</Text>
+            <View style={styles.itemTags}>
+              <View style={styles.itemTag}>
+                <Ionicons name="color-palette-outline" size={13} color={c.textMuted} />
+                <Text style={styles.itemTagTexto}>{cor}</Text>
+              </View>
+              <View style={styles.itemTag}>
+                <Ionicons name="resize-outline" size={13} color={c.textMuted} />
+                <Text style={styles.itemTagTexto}>Tam {tamanho ?? '-'}</Text>
+              </View>
+              <View style={styles.itemTag}>
+                <Ionicons name="layers-outline" size={13} color={c.textMuted} />
+                <Text style={styles.itemTagTexto}>{quantidade} {quantidade === 1 ? 'par' : 'pares'}</Text>
+              </View>
+            </View>
+          </View>
+
+          <Text style={[styles.statusBadge, getStatusCor(item.status)]}>
+            {item.status ? item.status.toUpperCase() : 'N/A'}
+          </Text>
+        </View>
+
+        <View style={styles.itemDetalhes}>
+          <View style={styles.detalheInfo}>
+              <Ionicons name="time-outline" size={16} color={isDarkMode ? '#aaa' : '#666'} />
+              <Text style={styles.detalheTexto}>{item.dataSolicitacaoFormatada}</Text>
+          </View>
+          {qrCode ? (
+            <View style={styles.detalheInfo}>
+              <Text style={styles.verDetalhes}>Ver produto</Text>
+              <Ionicons name="chevron-forward" size={16} color={c.primary} />
+            </View>
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // O placar é botão: tocar filtra a lista, tocar de novo volta a mostrar tudo.
+  const renderStat = (status, rotulo, estiloBadge, estiloNumero) => {
+    const ativo = filtroStatus === status;
+    return (
+      <Pressable
+        style={[styles.statBadge, estiloBadge, ativo && styles.statBadgeAtivo]}
+        onPress={() => setFiltroStatus(alternarStatus(filtroStatus, status))}
+        accessibilityLabel={`Filtrar por ${rotulo}`}
+        accessibilityState={{ selected: ativo }}
+      >
+        <Text style={[styles.statNumber, estiloNumero]}>{contagem[status]}</Text>
+        <Text style={styles.statLabel}>{rotulo}</Text>
+        {ativo && <View style={styles.statMarcador} />}
+      </Pressable>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -252,30 +336,21 @@ export default function RelatorioScreen({ navigation }) {
 
       <View style={styles.resumoFiltro}>
           <Text style={styles.resumoTexto}>
-              Mostrando: {filtroStatus === 'todos' ? 'Tudo' : filtroStatus} / {filtroTempo === 'todos' ? 'Desde o início' : filtroTempo === 'dia' ? 'Hoje' : filtroTempo === 'semana' ? '7 dias' : '30 dias'}
+              Mostrando: {filtroStatus === FILTRO_TODOS ? 'Tudo' : filtroStatus} / {filtroTempo === 'todos' ? 'Desde o início' : filtroTempo === 'dia' ? 'Hoje' : filtroTempo === 'semana' ? '7 dias' : '30 dias'}
           </Text>
       </View>
 
       <View style={styles.statsRow}>
-        <View style={[styles.statBadge, styles.statBadgeVendida]}>
-          <Text style={[styles.statNumber, styles.statNumberVendida]}>{totalVendidas}</Text>
-          <Text style={styles.statLabel}>Vendidas</Text>
-        </View>
-        <View style={[styles.statBadge, styles.statBadgePendente]}>
-          <Text style={[styles.statNumber, styles.statNumberPendente]}>{totalPendentes}</Text>
-          <Text style={styles.statLabel}>Pendentes</Text>
-        </View>
-        <View style={[styles.statBadge, styles.statBadgeCancelada]}>
-          <Text style={[styles.statNumber, styles.statNumberCancelada]}>{totalCanceladas}</Text>
-          <Text style={styles.statLabel}>Canceladas</Text>
-        </View>
+        {renderStat('vendida', 'Vendidas', styles.statBadgeVendida, styles.statNumberVendida)}
+        {renderStat('pendente', 'Pendentes', styles.statBadgePendente, styles.statNumberPendente)}
+        {renderStat('cancelada', 'Canceladas', styles.statBadgeCancelada, styles.statNumberCancelada)}
       </View>
 
       {loading ? (
         <ActivityIndicator size="large" color="#5865F2" style={{ marginTop: 40 }}/>
       ) : (
         <FlatList
-          data={solicitacoes}
+          data={solicitacoesFiltradas}
           renderItem={renderItemSolicitacao}
           keyExtractor={(item) => item.id}
           style={styles.list}
@@ -321,7 +396,7 @@ export default function RelatorioScreen({ navigation }) {
 
             <Text style={styles.filterSectionTitle}>Situação da Solicitação</Text>
             <View style={styles.chipContainer}>
-                {['todos', 'pendente', 'vendida', 'cancelada'].map(status => (
+                {[FILTRO_TODOS, 'pendente', 'vendida', 'cancelada'].map(status => (
                     <TouchableOpacity
                         key={status}
                         style={[styles.chip, filtroStatus === status && styles.chipActive]}
@@ -331,7 +406,7 @@ export default function RelatorioScreen({ navigation }) {
                           <View style={[styles.chipDot, { backgroundColor: STATUS_DOT_COLOR[status] }]} />
                         )}
                         <Text style={[styles.chipText, filtroStatus === status && styles.chipTextActive]}>
-                            {status === 'todos' ? 'Todos' : status.charAt(0).toUpperCase() + status.slice(1)}
+                            {status === FILTRO_TODOS ? 'Todos' : status.charAt(0).toUpperCase() + status.slice(1)}
                         </Text>
                     </TouchableOpacity>
                 ))}
@@ -363,7 +438,7 @@ export default function RelatorioScreen({ navigation }) {
                 ))}
             </View>
 
-            <TouchableOpacity 
+            <TouchableOpacity
                 style={styles.btnAplicarFiltro}
                 onPress={() => setModalFiltroVisible(false)}
             >

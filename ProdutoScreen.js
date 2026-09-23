@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
 import { Text, View, Image, ActivityIndicator, TouchableOpacity, FlatList, ScrollView, Pressable } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -9,6 +9,16 @@ import { collection, query, where, getDocs, doc, getDoc, onSnapshot, limit } fro
 import { assinarPendentesDoProduto, buscarVariacao, aplicarEscritas } from './dados/solicitacoesRepo';
 import { planejarVenda, planejarCancelamento } from './dominio/solicitacao';
 import { classificarEstoque } from './dominio/estoque';
+import {
+  agruparPorCor,
+  normalizarCor,
+  tamanhosDaCor,
+  encontrarVariacao,
+  escolhaInicial,
+  tamanhoAoTrocarCor,
+  limitarQuantidade,
+  descreverItem,
+} from './dominio/variacoes';
 import { ThemeContext } from './ThemeContext';
 import { getProdutoStyles } from './styles';
 import AppAlert, { useAppAlert } from './AppAlert';
@@ -29,6 +39,15 @@ export default function ProdutoScreen({ route, navigation }) {
   const [solicitacoesAtivas, setSolicitacoesAtivas] = useState([]);
   const [outrosProdutos, setOutrosProdutos] = useState([]);
   const [carregandoOutros, setCarregandoOutros] = useState(true);
+
+  // Seleção no modelo do Shopee: uma cor, uma numeração e uma quantidade.
+  const [corSelecionada, setCorSelecionada] = useState(null);
+  const [tamanhoSelecionado, setTamanhoSelecionado] = useState(null);
+  const [quantidade, setQuantidade] = useState(1);
+  // O onSnapshot reemite a cada mudança de estoque. Sem esta trava, a venda de
+  // um par feita por outro vendedor jogaria a seleção do usuário de volta ao
+  // início no meio do atendimento.
+  const selecaoIniciada = useRef(false);
 
   useEffect(() => {
     // `ativo` evita o vazamento de quem sai da tela antes do fetch terminar:
@@ -72,6 +91,23 @@ export default function ProdutoScreen({ route, navigation }) {
       if (unsubscribeVariacoes) unsubscribeVariacoes();
     };
   }, [qrCode]);
+
+  // Abre já na cor e na numeração do par que foi escaneado. Só volta a mexer na
+  // seleção se a cor escolhida sumir do catálogo (variação apagada no estoque)
+  // — aí a tela ficaria travada num seletor sem numeração nenhuma.
+  useEffect(() => {
+    if (variacoes.length === 0) return;
+    const corAindaExiste =
+      corSelecionada !== null &&
+      variacoes.some((v) => normalizarCor(v.cor) === corSelecionada);
+    if (selecaoIniciada.current && corAindaExiste) return;
+
+    const inicial = escolhaInicial(variacoes, qrCode);
+    setCorSelecionada(inicial.cor);
+    setTamanhoSelecionado(inicial.tamanho);
+    setQuantidade(1);
+    selecaoIniciada.current = true;
+  }, [variacoes, qrCode, corSelecionada]);
 
   useEffect(() => {
     if (!produto || !produto.id) return;
@@ -129,33 +165,75 @@ export default function ProdutoScreen({ route, navigation }) {
     return () => { ativo = false; };
   }, [produto]);
 
-  const handleSolicitar = async (itemSolicitado) => {
-    if (itemSolicitado.estoque <= 0) {
+  // --- Seleção de cor × numeração --------------------------------------------
+
+  const gruposDeCor = useMemo(() => agruparPorCor(variacoes), [variacoes]);
+  const tamanhosDisponiveis = useMemo(
+    () => tamanhosDaCor(variacoes, corSelecionada),
+    [variacoes, corSelecionada]
+  );
+  const variacaoSelecionada = useMemo(
+    () => encontrarVariacao(variacoes, corSelecionada, tamanhoSelecionado),
+    [variacoes, corSelecionada, tamanhoSelecionado]
+  );
+
+  const estoqueSelecionado = Number(variacaoSelecionada?.estoque) || 0;
+  // A quantidade é derivada, não só guardada: se o estoque cair por baixo dela
+  // enquanto a tela está aberta, o número na tela desce junto.
+  const quantidadeEfetiva = limitarQuantidade(quantidade, estoqueSelecionado);
+  const situacaoSelecionada = classificarEstoque(estoqueSelecionado);
+  const temMaisDeUmaCor = gruposDeCor.length > 1;
+
+  const selecionarCor = (cor) => {
+    setCorSelecionada(cor);
+    setTamanhoSelecionado(tamanhoAoTrocarCor(variacoes, cor, tamanhoSelecionado));
+    setQuantidade(1);
+  };
+
+  const selecionarTamanho = (tamanho) => {
+    setTamanhoSelecionado(tamanho);
+    setQuantidade(1);
+  };
+
+  const ajustarQuantidade = (delta) => {
+    setQuantidade(limitarQuantidade(quantidadeEfetiva + delta, estoqueSelecionado));
+  };
+
+  const handleSolicitar = async () => {
+    if (!variacaoSelecionada) {
+      showAlert({ type: 'warning', title: 'Escolha uma opção', message: 'Selecione a cor e a numeração antes de adicionar à sacola.', actions: [{ label: 'OK' }] });
+      return;
+    }
+    if (estoqueSelecionado <= 0) {
       showAlert({ type: 'warning', title: 'Indisponível', message: 'Este produto está sem estoque físico!', actions: [{ label: 'OK' }] });
       return;
     }
+
+    const nomeCompleto = descreverItem(produto.nome, variacaoSelecionada.cor, variacaoSelecionada.tamanho);
+
     showAlert({
       type: 'info',
       title: 'Adicionar à Sacola',
-      message: `Colocar [${produto.nome} - Tam: ${itemSolicitado.tamanho}] na sacola de solicitações?`,
+      message: `Colocar ${quantidadeEfetiva} ${quantidadeEfetiva === 1 ? 'par' : 'pares'} de [${nomeCompleto}] na sacola de solicitações?`,
       actions: [
         { label: 'Cancelar', style: 'cancel' },
         {
           label: 'Adicionar',
           onPress: async () => {
             try {
-              const corFormatada = itemSolicitado.cor || 'Única';
-              const nomeCompleto = `${produto.nome} - Cor: ${corFormatada} - Tam: ${itemSolicitado.tamanho}`;
-
               const itemSacola = {
                 id_unico: Date.now().toString(),
-                produto_id: itemSolicitado.produto_id,
-                variacao_id: itemSolicitado.id,
-                qrCode: itemSolicitado.qr_code,
+                produto_id: variacaoSelecionada.produto_id,
+                variacao_id: variacaoSelecionada.id,
+                qrCode: variacaoSelecionada.qr_code,
                 nomeProduto: nomeCompleto,
-                tamanho: itemSolicitado.tamanho,
-                cor: corFormatada,
-                quantidade: 1
+                // Campos soltos: a Sacola e os Relatórios mostram o tênis em
+                // partes (foto, nome, cor, numeração) em vez de um texto só.
+                nomeBase: produto.nome,
+                imagemUrl: variacaoSelecionada.imagemUrl || produto.imagemUrl || null,
+                tamanho: variacaoSelecionada.tamanho,
+                cor: variacaoSelecionada.cor || 'Única',
+                quantidade: quantidadeEfetiva
               };
 
               const sacolaAtual = await AsyncStorage.getItem('@sacola_pedidos');
@@ -220,43 +298,114 @@ export default function ProdutoScreen({ route, navigation }) {
 
   const estoqueTotal = variacoes.reduce((soma, v) => soma + (v.estoque || 0), 0);
 
-  const renderItemVariacao = ({ item }) => {
-    const situacaoEstoque = classificarEstoque(item.estoque);
+  const renderSeletorDeCor = () => {
+    // Produto de cor única não ganha um seletor com uma opção só.
+    if (!temMaisDeUmaCor) return null;
     return (
-    <View style={styles.variacaoItem}>
-      <View style={styles.variacaoConteudo}>
-        <View style={styles.variacaoThumbWrapper}>
-          {item.imagemUrl ? (
-            <Image source={{ uri: item.imagemUrl }} style={styles.variacaoThumbImage} resizeMode="cover" />
-          ) : (
-            <Ionicons name="footsteps-outline" size={20} color={placeholderIconColor} />
-          )}
-        </View>
-        <View>
-          <Text style={styles.variacaoTamanho}>Tamanho: {item.tamanho} ({item.cor})</Text>
-          {situacaoEstoque === 'zerado' ? (
-            <Text style={styles.estoqueIndisponivel}>Estoque Zerado</Text>
-          ) : (
-            <Text style={styles.estoqueDisponivel}>{item.estoque} disponíveis</Text>
-          )}
-          {situacaoEstoque === 'baixo' && (
-            <View style={styles.tagEstoqueBaixo}>
-              <Text style={styles.tagEstoqueBaixoText}>Estoque baixo</Text>
-            </View>
-          )}
+      <View style={styles.opcaoBloco}>
+        <Text style={styles.opcaoLabel}>Cor</Text>
+        <View style={styles.opcaoLista}>
+          {gruposDeCor.map((grupo) => {
+            const ativa = grupo.cor === corSelecionada;
+            const esgotada = grupo.estoqueTotal <= 0;
+            return (
+              <TouchableOpacity
+                key={grupo.cor}
+                style={[styles.corChip, ativa && styles.corChipAtiva, esgotada && styles.opcaoChipEsgotada]}
+                onPress={() => selecionarCor(grupo.cor)}
+                accessibilityLabel={`Cor ${grupo.cor}`}
+                accessibilityState={{ selected: ativa }}
+              >
+                <View style={styles.corChipThumb}>
+                  {grupo.imagemUrl ? (
+                    <Image source={{ uri: grupo.imagemUrl }} style={styles.corChipImagem} resizeMode="cover" />
+                  ) : (
+                    <Ionicons name="footsteps-outline" size={14} color={placeholderIconColor} />
+                  )}
+                </View>
+                <Text
+                  style={[styles.corChipTexto, ativa && styles.opcaoChipTextoAtivo, esgotada && styles.opcaoChipTextoEsgotado]}
+                  numberOfLines={1}
+                >
+                  {grupo.cor}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
-      <TouchableOpacity
-        style={[styles.btnAdicionar, item.estoque === 0 && styles.btnAdicionarDisabled]}
-        onPress={() => handleSolicitar(item)}
-        disabled={item.estoque === 0}
-      >
-        <Ionicons name="bag-add-outline" size={18} color="#fff" />
-        <Text style={styles.btnAdicionarText}>Adicionar</Text>
-      </TouchableOpacity>
-    </View>
     );
   };
+
+  const renderSeletorDeTamanho = () => (
+    <View style={styles.opcaoBloco}>
+      <Text style={styles.opcaoLabel}>Tamanho</Text>
+      {tamanhosDisponiveis.length === 0 ? (
+        <Text style={styles.opcaoVazia}>Nenhuma numeração cadastrada para esta cor.</Text>
+      ) : (
+        <View style={styles.opcaoLista}>
+          {tamanhosDisponiveis.map((item) => {
+            const ativo = String(item.tamanho) === String(tamanhoSelecionado);
+            const esgotado = (Number(item.estoque) || 0) <= 0;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.tamanhoChip, ativo && styles.corChipAtiva, esgotado && styles.opcaoChipEsgotada]}
+                onPress={() => selecionarTamanho(item.tamanho)}
+                accessibilityLabel={`Numeração ${item.tamanho}`}
+                accessibilityState={{ selected: ativo, disabled: esgotado }}
+              >
+                <Text
+                  style={[styles.tamanhoChipTexto, ativo && styles.opcaoChipTextoAtivo, esgotado && styles.opcaoChipTextoEsgotado]}
+                >
+                  {item.tamanho}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+
+  const renderSeletorDeQuantidade = () => (
+    <View style={styles.opcaoBloco}>
+      <Text style={styles.opcaoLabel}>Quantidade</Text>
+      <View style={styles.quantidadeLinha}>
+        <View style={styles.quantidadeStepper}>
+          <TouchableOpacity
+            style={[styles.quantidadeBotao, quantidadeEfetiva <= 1 && styles.quantidadeBotaoDesabilitado]}
+            onPress={() => ajustarQuantidade(-1)}
+            disabled={quantidadeEfetiva <= 1}
+            accessibilityLabel="Diminuir quantidade"
+          >
+            <Ionicons name="remove" size={18} color={isDarkMode ? '#F2F3F5' : '#111'} />
+          </TouchableOpacity>
+          <Text style={styles.quantidadeValor}>{quantidadeEfetiva}</Text>
+          <TouchableOpacity
+            style={[styles.quantidadeBotao, quantidadeEfetiva >= estoqueSelecionado && styles.quantidadeBotaoDesabilitado]}
+            onPress={() => ajustarQuantidade(1)}
+            disabled={quantidadeEfetiva >= estoqueSelecionado}
+            accessibilityLabel="Aumentar quantidade"
+          >
+            <Ionicons name="add" size={18} color={isDarkMode ? '#F2F3F5' : '#111'} />
+          </TouchableOpacity>
+        </View>
+
+        {situacaoSelecionada === 'zerado' ? (
+          <Text style={styles.estoqueIndisponivel}>Esgotado nesta opção</Text>
+        ) : (
+          <Text style={styles.estoqueDisponivel}>{estoqueSelecionado} disponíveis</Text>
+        )}
+      </View>
+
+      {situacaoSelecionada === 'baixo' && (
+        <View style={styles.tagEstoqueBaixo}>
+          <Text style={styles.tagEstoqueBaixoText}>Estoque baixo</Text>
+        </View>
+      )}
+    </View>
+  );
 
   const renderSolicitacoesConcorrentes = () => {
     if (solicitacoesAtivas.length === 0) return null;
@@ -270,7 +419,7 @@ export default function ProdutoScreen({ route, navigation }) {
             <View key={index} style={styles.concorrenteItem}>
               <View style={styles.concorrenteInfo}>
                   <Text style={styles.concorrenteTexto}>👤 <Text style={{fontWeight: 'bold'}}>{isDono ? 'Você' : sol.usuario_email}</Text></Text>
-                  <Text style={styles.concorrenteTexto}>📦 {sol.quantidade} par (Tam: {sol.tamanho})</Text>
+                  <Text style={styles.concorrenteTexto}>📦 {sol.quantidade} par (Tam: {sol.tamanho}{sol.cor ? ` · ${sol.cor}` : ''})</Text>
               </View>
               {isDono ? (
                 <View style={styles.actionRow}>
@@ -349,9 +498,12 @@ export default function ProdutoScreen({ route, navigation }) {
     );
   }
 
-  // Imagem de destaque: usa a foto do produto se existir; senão, cai para a
-  // primeira variação (tamanho/cor) que já tenha foto cadastrada.
-  const imagemDestaque = produto?.imagemUrl || variacoes.find((v) => v.imagemUrl)?.imagemUrl;
+  // Imagem de destaque: acompanha a cor escolhida — é o que faz o mesmo modelo
+  // em outra cor aparecer sem trocar de tela. Sem foto por cor, cai para a do
+  // produto e, por último, para a primeira variação que tiver alguma.
+  const corEmDestaque = gruposDeCor.find((g) => g.cor === corSelecionada);
+  const imagemDestaque =
+    corEmDestaque?.imagemUrl || produto?.imagemUrl || variacoes.find((v) => v.imagemUrl)?.imagemUrl;
 
   return (
     <View style={styles.scrollContainer}>
@@ -370,6 +522,11 @@ export default function ProdutoScreen({ route, navigation }) {
 
         <View style={styles.titleRow}>
           <Text style={styles.title}>{produto?.nome}</Text>
+          {temMaisDeUmaCor && (
+            <Text style={styles.subtitulo}>
+              {gruposDeCor.length} cores deste modelo
+            </Text>
+          )}
           <View style={[styles.estoqueBadge, estoqueTotal === 0 && styles.estoqueBadgeZerado]}>
             <Ionicons
               name={estoqueTotal > 0 ? 'checkmark-circle' : 'close-circle'}
@@ -382,8 +539,20 @@ export default function ProdutoScreen({ route, navigation }) {
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Selecionar Tamanho</Text>
-        <FlatList data={variacoes} renderItem={renderItemVariacao} keyExtractor={(item) => item.id} style={styles.list} scrollEnabled={false} />
+        <View style={styles.seletorCard}>
+          {renderSeletorDeCor()}
+          {renderSeletorDeTamanho()}
+          {renderSeletorDeQuantidade()}
+
+          <TouchableOpacity
+            style={[styles.btnAdicionar, estoqueSelecionado === 0 && styles.btnAdicionarDisabled]}
+            onPress={handleSolicitar}
+            disabled={estoqueSelecionado === 0}
+          >
+            <Ionicons name="bag-add-outline" size={20} color="#fff" />
+            <Text style={styles.btnAdicionarText}>Adicionar à Sacola</Text>
+          </TouchableOpacity>
+        </View>
 
         {renderSolicitacoesConcorrentes()}
 
