@@ -311,9 +311,32 @@ export const getProdutoStyles = (isDarkMode) => {
       borderRadius: 12,
       marginBottom: 10,
     },
+    variacaoConteudo: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
+    variacaoThumbWrapper: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      overflow: 'hidden',
+      backgroundColor: c.background,
+      borderWidth: 1,
+      borderColor: c.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    variacaoThumbImage: { width: '100%', height: '100%' },
     variacaoTamanho: { fontSize: 16, fontWeight: 'bold', color: c.text },
     estoqueDisponivel: { fontSize: 14, color: c.success, marginTop: 4 },
     estoqueIndisponivel: { fontSize: 14, color: c.danger, marginTop: 4 },
+    tagEstoqueBaixo: {
+      alignSelf: 'flex-start',
+      backgroundColor: c.warningBg,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+      marginTop: 4,
+    },
+    tagEstoqueBaixoText: { fontSize: 11, fontWeight: 'bold', color: c.warningText },
     btnAdicionar: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -381,12 +404,10 @@ export const getConfiguracoesStyles = (isDarkMode) => {
   const c = colors(isDarkMode);
 
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: c.background, padding: 20, paddingTop: Constants.statusBarHeight + 20 },
-    profileSection: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, padding: 20, borderRadius: 12, marginBottom: 25, borderWidth: 1, borderColor: c.border },
-    avatarContainer: { width: 60, height: 60, borderRadius: 30, backgroundColor: isDarkMode ? '#1E1F22' : '#eee', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-    profileInfo: { flex: 1 },
-    profileName: { fontSize: 18, fontWeight: 'bold', color: c.text, marginBottom: 4 },
-    profileEmail: { fontSize: 14, color: c.textMuted },
+    container: { flex: 1, backgroundColor: c.background, paddingHorizontal: 20, paddingTop: Constants.statusBarHeight + 20 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 30 },
+    backButton: { padding: 5, marginLeft: -5 },
+    title: { fontSize: 20, fontWeight: 'bold', color: c.text },
     sectionTitle: { fontSize: 13, fontWeight: 'bold', color: c.textMuted, marginBottom: 10, marginLeft: 5, textTransform: 'uppercase' },
 
     menuContainer: { backgroundColor: c.card, borderRadius: 12, overflow: 'hidden', marginBottom: 25, borderWidth: 1, borderColor: c.border },
@@ -395,10 +416,78 @@ export const getConfiguracoesStyles = (isDarkMode) => {
     iconColor: { color: isDarkMode ? '#aaa' : '#555' },
     icon: { marginRight: 15 },
     menuText: { fontSize: 16, color: c.text, fontWeight: '500' },
+  });
+};
 
-    logoutButton: { flexDirection: 'row', backgroundColor: c.danger, padding: 15, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
-    iconLogout: { marginRight: 10 },
-    logoutText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+// ===================== SideMenu =====================
+export const getSideMenuStyles = (isDarkMode) => {
+  const c = colors(isDarkMode);
+
+  return StyleSheet.create({
+    // elevation/zIndex altos: a barra flutuante usa elevation 12 e precisa ficar por baixo.
+    overlay: { ...StyleSheet.absoluteFillObject, zIndex: 40, elevation: 40 },
+    backdrop: { backgroundColor: 'rgba(0,0,0,0.55)' },
+    panel: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      right: 0,
+      backgroundColor: c.background,
+      paddingTop: Constants.statusBarHeight + 20,
+      paddingHorizontal: 20,
+      paddingBottom: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: -4, height: 0 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 16,
+    },
+    closeButton: { alignSelf: 'flex-end', padding: 4 },
+    profile: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, marginTop: 4 },
+    avatar: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: c.primaryLight,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 14,
+    },
+    profileInfo: { flex: 1 },
+    profileName: { fontSize: 18, fontWeight: '800', color: c.text },
+    profileEmail: { fontSize: 13, color: c.textMuted, marginTop: 2 },
+
+    sectionTitle: { fontSize: 12, fontWeight: 'bold', color: c.textMuted, marginBottom: 8, marginLeft: 4, textTransform: 'uppercase' },
+    sectionContainer: {
+      backgroundColor: c.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+      overflow: 'hidden',
+      marginBottom: 20,
+    },
+    item: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    itemLast: { borderBottomWidth: 0 },
+    itemIcon: { marginRight: 14 },
+    itemLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: c.text },
+
+    logoutButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.danger,
+      paddingVertical: 14,
+      borderRadius: 14,
+      marginTop: 12,
+    },
+    logoutText: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginLeft: 8 },
   });
 };
 
@@ -456,6 +545,14 @@ export const getSolicitacoesStyles = (isDarkMode) => {
       shadowRadius: 3,
       elevation: isDarkMode ? 0 : 2,
     },
+    cardAtencao: {
+      borderLeftWidth: 4,
+      borderLeftColor: c.warning,
+    },
+    cardCritico: {
+      borderLeftWidth: 4,
+      borderLeftColor: c.danger,
+    },
     cardHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -483,6 +580,9 @@ export const getSolicitacoesStyles = (isDarkMode) => {
       fontSize: 13,
       color: c.warningText,
       fontWeight: '700',
+    },
+    tempoDecorridoTextCritico: {
+      color: c.dangerText,
     },
     tempoBadge: {
       backgroundColor: c.badgeBg,
@@ -1006,6 +1106,47 @@ export const getHomeStyles = (isDarkMode) => {
   });
 };
 
+// ===================== EstoqueBaixoScreen =====================
+export const getEstoqueBaixoStyles = (isDarkMode) => {
+  const c = colors(isDarkMode);
+
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background, paddingTop: Constants.statusBarHeight + 20 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
+    backButton: { padding: 5, marginLeft: -5 },
+    title: { fontSize: 20, fontWeight: 'bold', color: c.text },
+    subtitle: { fontSize: 14, color: c.textMuted, paddingHorizontal: 20, marginBottom: 20 },
+    listContent: { paddingHorizontal: 20, paddingBottom: 40 },
+
+    item: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      padding: 16,
+      borderRadius: 12,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderLeftWidth: 4,
+    },
+    itemZerado: { borderLeftColor: c.danger },
+    itemBaixo: { borderLeftColor: c.warning },
+    itemNome: { fontSize: 16, fontWeight: '700', color: c.text },
+    itemDetalhes: { fontSize: 13, color: c.textMuted, marginTop: 3 },
+
+    badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+    badgeZerado: { backgroundColor: c.dangerBg },
+    badgeBaixo: { backgroundColor: c.warningBg },
+    badgeText: { fontSize: 12, fontWeight: 'bold' },
+    badgeTextZerado: { color: c.dangerText },
+    badgeTextBaixo: { color: c.warningText },
+
+    emptyContainer: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
+    emptyText: { marginTop: 20, fontSize: 16, color: c.textMuted, textAlign: 'center' },
+  });
+};
+
 // ===================== AppAlert =====================
 export const getAppAlertStyles = (isDarkMode) => {
   const c = colors(isDarkMode);
@@ -1062,11 +1203,13 @@ export const getAppAlertStyles = (isDarkMode) => {
       flexDirection: 'column',
     },
     actionBtn: {
-      flex: 1,
       paddingVertical: 13,
       borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    actionBtnFlex: {
+      flex: 1,
     },
     actionBtnCancel: {
       backgroundColor: c.secondary,

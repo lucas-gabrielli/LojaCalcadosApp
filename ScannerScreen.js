@@ -85,7 +85,8 @@ export default function ScannerScreen({ navigation }) {
   const handleBarCodeScanned = ({ data }) => {
     setIsScanning(false); // Trava a câmera imediatamente após ler
     const codigoLimpo = String(data).trim();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // .catch: aparelho sem vibração não pode derrubar a leitura.
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
     showAlert({
       type: 'info',
@@ -127,7 +128,7 @@ export default function ScannerScreen({ navigation }) {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <Header />
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">

@@ -21,7 +21,7 @@ export default function SacolaScreen() {
     useCallback(() => {
       const loadSacola = async () => {
         const dados = await AsyncStorage.getItem('@sacola_pedidos');
-        if (dados) setSacola(JSON.parse(dados));
+        setSacola(dados ? JSON.parse(dados) : []);
       };
       loadSacola();
     }, [])

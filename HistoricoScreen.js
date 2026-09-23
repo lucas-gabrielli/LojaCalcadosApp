@@ -31,9 +31,7 @@ export default function HistoricoScreen({ navigation }) {
   const carregarHistorico = async () => {
     try {
       const histRaw = await AsyncStorage.getItem('@historico_scan');
-      if (histRaw) {
-        setHistorico(JSON.parse(histRaw));
-      }
+      setHistorico(histRaw ? JSON.parse(histRaw) : []);
     } catch (e) {
       console.error("Erro ao carregar histórico:", e);
     }
@@ -61,7 +59,7 @@ export default function HistoricoScreen({ navigation }) {
   const renderItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.item}
-      onPress={() => navigation.navigate('Início', { screen: 'Produto', params: { qrCode: item } })}
+      onPress={() => navigation.navigate('Produto', { qrCode: item })}
     >
       <View style={styles.itemContent}>
         <Ionicons name="barcode-outline" size={24} color={isDarkMode ? '#aaa' : '#555'} />

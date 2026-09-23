@@ -3,7 +3,12 @@ import { Text, View, Image, ActivityIndicator, TouchableOpacity, FlatList, Scrol
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { db, auth } from './firebaseConfig';
-import { collection, query, where, getDocs, doc, getDoc, Timestamp, onSnapshot, updateDoc, increment, limit } from 'firebase/firestore';
+// Leitura de catálogo ainda usa o SDK direto — fora do escopo do ADR-001.
+import { collection, query, where, getDocs, doc, getDoc, onSnapshot, limit } from 'firebase/firestore';
+// ADR-001: a regra de venda e devolução saiu daqui.
+import { assinarPendentesDoProduto, buscarVariacao, aplicarEscritas } from './dados/solicitacoesRepo';
+import { planejarVenda, planejarCancelamento } from './dominio/solicitacao';
+import { classificarEstoque } from './dominio/estoque';
 import { ThemeContext } from './ThemeContext';
 import { getProdutoStyles } from './styles';
 import AppAlert, { useAppAlert } from './AppAlert';
@@ -26,6 +31,9 @@ export default function ProdutoScreen({ route, navigation }) {
   const [carregandoOutros, setCarregandoOutros] = useState(true);
 
   useEffect(() => {
+    // `ativo` evita o vazamento de quem sai da tela antes do fetch terminar:
+    // sem ele, o onSnapshot nascia DEPOIS da limpeza e nunca era cancelado.
+    let ativo = true;
     let unsubscribeVariacoes;
     const fetchProdutoCompleto = async () => {
       setLoading(true);
@@ -42,6 +50,7 @@ export default function ProdutoScreen({ route, navigation }) {
         const produtoSnap = await getDoc(produtoRef);
 
         if (!produtoSnap.exists()) throw new Error('Produto principal não encontrado!');
+        if (!ativo) return;
         setProduto({ id: produtoId, ...produtoSnap.data() });
 
         const qTodasVariacoes = query(variacoesRef, where('produto_id', '==', produtoId));
@@ -52,24 +61,21 @@ export default function ProdutoScreen({ route, navigation }) {
             setVariacoes(listaVariacoes);
         });
       } catch (e) {
-        setError(e.message);
+        if (ativo) setError(e.message);
       } finally {
-        setLoading(false);
+        if (ativo) setLoading(false);
       }
     };
     fetchProdutoCompleto();
-    return () => { if (unsubscribeVariacoes) unsubscribeVariacoes(); };
+    return () => {
+      ativo = false;
+      if (unsubscribeVariacoes) unsubscribeVariacoes();
+    };
   }, [qrCode]);
 
   useEffect(() => {
     if (!produto || !produto.id) return;
-    const solicitacoesRef = collection(db, 'solicitacoes');
-    const qSolicitacoes = query(solicitacoesRef, where('produto_id', '==', produto.id), where('status', '==', 'pendente'));
-    const unsubscribeSolicitacoes = onSnapshot(qSolicitacoes, (snapshot) => {
-      const listaSolicitacoes = [];
-      snapshot.forEach((doc) => listaSolicitacoes.push({ id: doc.id, ...doc.data() }));
-      setSolicitacoesAtivas(listaSolicitacoes);
-    });
+    const unsubscribeSolicitacoes = assinarPendentesDoProduto(produto.id, setSolicitacoesAtivas);
     return () => unsubscribeSolicitacoes();
   }, [produto]);
 
@@ -102,7 +108,9 @@ export default function ProdutoScreen({ route, navigation }) {
           return {
             id: produtoId,
             nome: produtoSnap.data().nome,
-            imagemUrl: produtoSnap.data().imagemUrl || null,
+            // A foto do produto (se existir) vence; senão usa a da própria
+            // variação — é lá que a foto por cor é cadastrada.
+            imagemUrl: produtoSnap.data().imagemUrl || variacao.imagemUrl || null,
             qrCode: variacao.qr_code,
             tamanho: variacao.tamanho,
             estoque: variacao.estoque,
@@ -165,7 +173,9 @@ export default function ProdutoScreen({ route, navigation }) {
     });
   };
 
-  const handleDevolver = async (solicitacaoId) => {
+  // ADR-001: as duas cópias da regra viraram uma. Estas funções agora só
+  // perguntam ao domínio e mandam o repositório gravar o plano.
+  const handleDevolver = async (solicitacao) => {
     showAlert({
       type: 'danger',
       title: 'Devolver Tênis',
@@ -173,7 +183,12 @@ export default function ProdutoScreen({ route, navigation }) {
       actions: [
         { label: 'Voltar', style: 'cancel' },
         { label: 'Devolver', style: 'destructive', onPress: async () => {
-            try { await updateDoc(doc(db, 'solicitacoes', solicitacaoId), { status: 'cancelada' }); }
+            const plano = planejarCancelamento(solicitacao);
+            if (!plano.ok) {
+              showAlert({ type: 'warning', title: 'Não é possível devolver', message: plano.mensagem, actions: [{ label: 'OK' }] });
+              return;
+            }
+            try { await aplicarEscritas(plano.escritas); }
             catch (error) { showAlert({ type: 'danger', title: 'Erro', message: 'Falha ao devolver.', actions: [{ label: 'OK' }] }); }
         }},
       ],
@@ -189,8 +204,13 @@ export default function ProdutoScreen({ route, navigation }) {
         { label: 'Cancelar', style: 'cancel' },
         { label: 'Vender', onPress: async () => {
             try {
-              await updateDoc(doc(db, 'solicitacoes', solicitacao.id), { status: 'vendida', dataVenda: Timestamp.now() });
-              await updateDoc(doc(db, 'variacoes', solicitacao.variacao_id), { estoque: increment(-solicitacao.quantidade) });
+              const variacao = await buscarVariacao(solicitacao.variacao_id);
+              const plano = planejarVenda(solicitacao, variacao);
+              if (!plano.ok) {
+                showAlert({ type: 'warning', title: 'Não é possível vender', message: plano.mensagem, actions: [{ label: 'OK' }] });
+                return;
+              }
+              await aplicarEscritas(plano.escritas);
               showAlert({ type: 'success', title: 'Sucesso', message: 'Venda finalizada!', actions: [{ label: 'OK' }] });
             } catch (error) { showAlert({ type: 'danger', title: 'Erro', message: 'Falha ao vender.', actions: [{ label: 'OK' }] }); }
         }},
@@ -200,15 +220,31 @@ export default function ProdutoScreen({ route, navigation }) {
 
   const estoqueTotal = variacoes.reduce((soma, v) => soma + (v.estoque || 0), 0);
 
-  const renderItemVariacao = ({ item }) => (
+  const renderItemVariacao = ({ item }) => {
+    const situacaoEstoque = classificarEstoque(item.estoque);
+    return (
     <View style={styles.variacaoItem}>
-      <View>
-        <Text style={styles.variacaoTamanho}>Tamanho: {item.tamanho} ({item.cor})</Text>
-        {item.estoque > 0 ? (
-          <Text style={styles.estoqueDisponivel}>{item.estoque} disponíveis</Text>
-        ) : (
-          <Text style={styles.estoqueIndisponivel}>Estoque Zerado</Text>
-        )}
+      <View style={styles.variacaoConteudo}>
+        <View style={styles.variacaoThumbWrapper}>
+          {item.imagemUrl ? (
+            <Image source={{ uri: item.imagemUrl }} style={styles.variacaoThumbImage} resizeMode="cover" />
+          ) : (
+            <Ionicons name="footsteps-outline" size={20} color={placeholderIconColor} />
+          )}
+        </View>
+        <View>
+          <Text style={styles.variacaoTamanho}>Tamanho: {item.tamanho} ({item.cor})</Text>
+          {situacaoEstoque === 'zerado' ? (
+            <Text style={styles.estoqueIndisponivel}>Estoque Zerado</Text>
+          ) : (
+            <Text style={styles.estoqueDisponivel}>{item.estoque} disponíveis</Text>
+          )}
+          {situacaoEstoque === 'baixo' && (
+            <View style={styles.tagEstoqueBaixo}>
+              <Text style={styles.tagEstoqueBaixoText}>Estoque baixo</Text>
+            </View>
+          )}
+        </View>
       </View>
       <TouchableOpacity
         style={[styles.btnAdicionar, item.estoque === 0 && styles.btnAdicionarDisabled]}
@@ -219,7 +255,8 @@ export default function ProdutoScreen({ route, navigation }) {
         <Text style={styles.btnAdicionarText}>Adicionar</Text>
       </TouchableOpacity>
     </View>
-  );
+    );
+  };
 
   const renderSolicitacoesConcorrentes = () => {
     if (solicitacoesAtivas.length === 0) return null;
@@ -237,7 +274,7 @@ export default function ProdutoScreen({ route, navigation }) {
               </View>
               {isDono ? (
                 <View style={styles.actionRow}>
-                    <Pressable style={[styles.actionBtn, styles.btnDevolver]} onPress={() => handleDevolver(sol.id)}><Text style={styles.btnDevolverText}>Devolver</Text></Pressable>
+                    <Pressable style={[styles.actionBtn, styles.btnDevolver]} onPress={() => handleDevolver(sol)}><Text style={styles.btnDevolverText}>Devolver</Text></Pressable>
                     <Pressable style={[styles.actionBtn, styles.btnVender]} onPress={() => handleVender(sol)}><Text style={styles.btnVenderText}>Vender</Text></Pressable>
                 </View>
               ) : (
@@ -275,7 +312,16 @@ export default function ProdutoScreen({ route, navigation }) {
         <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#F2F3F5' : '#111'} />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>Detalhes do Produto</Text>
-      <View style={{ width: 24 }} />
+      {/* Ao entrar em "outros produtos" várias vezes seguidas, a pilha cresce
+          (cada um empilha uma nova tela de Produto). Este botão zera a pilha
+          e volta direto ao Início, em vez de exigir voltar tela por tela. */}
+      <TouchableOpacity
+        onPress={() => navigation.popToTop()}
+        style={styles.backButton}
+        accessibilityLabel="Voltar ao Início"
+      >
+        <Ionicons name="home-outline" size={22} color={isDarkMode ? '#F2F3F5' : '#111'} />
+      </TouchableOpacity>
     </View>
   );
 
@@ -303,13 +349,17 @@ export default function ProdutoScreen({ route, navigation }) {
     );
   }
 
+  // Imagem de destaque: usa a foto do produto se existir; senão, cai para a
+  // primeira variação (tamanho/cor) que já tenha foto cadastrada.
+  const imagemDestaque = produto?.imagemUrl || variacoes.find((v) => v.imagemUrl)?.imagemUrl;
+
   return (
     <View style={styles.scrollContainer}>
       <Header />
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.imageWrapper}>
-          {produto?.imagemUrl ? (
-            <Image source={{ uri: produto.imagemUrl }} style={styles.productImage} resizeMode="cover" />
+          {imagemDestaque ? (
+            <Image source={{ uri: imagemDestaque }} style={styles.productImage} resizeMode="cover" />
           ) : (
             <>
               <Ionicons name="footsteps-outline" size={64} color={placeholderIconColor} />

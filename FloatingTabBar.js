@@ -9,12 +9,11 @@ const ICONS_BY_ROUTE = {
   'Início': ['home-outline', 'home'],
   Sacola: ['bag-handle-outline', 'bag-handle'],
   'Solicitações': ['receipt-outline', 'receipt'],
-  'Configurações': ['settings-outline', 'settings'],
 };
 
 // Sub-telas que já têm seu próprio cabeçalho com "voltar" — a barra flutuante
 // só faz sentido nas telas-raiz de cada aba, onde o vendedor precisa trocar rápido.
-const HIDDEN_ON_NESTED_ROUTES = ['Scanner', 'Produto', 'Metas', 'Historico', 'Seguranca', 'Aparencia', 'Relatorio'];
+const HIDDEN_ON_NESTED_ROUTES = ['Scanner', 'Produto', 'Metas', 'Historico', 'Seguranca', 'Aparencia', 'Relatorio', 'EstoqueBaixo', 'Configuracoes'];
 
 export default function FloatingTabBar({ state, descriptors, navigation, insets }) {
   const { isDarkMode } = useContext(ThemeContext);

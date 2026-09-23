@@ -6,6 +6,9 @@ import { useIsFocused } from '@react-navigation/native';
 import { ThemeContext } from './ThemeContext';
 import { auth, db } from './firebaseConfig';
 import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+// ADR-001: o cálculo do lead time — o indicador do artigo — saiu daqui.
+import { paraSolicitacao } from './dados/solicitacoesRepo';
+import { STATUS, mediaLeadTimeMinutos } from './dominio/solicitacao';
 import { getMetasStyles } from './styles';
 
 export default function MetasScreen({ navigation }) {
@@ -37,26 +40,16 @@ export default function MetasScreen({ navigation }) {
         const q = query(
           collection(db, 'solicitacoes'),
           where('usuario_email', '==', usuario.email),
-          where('status', '==', 'vendida'),
+          where('status', '==', STATUS.VENDIDA),
           where('dataVenda', '>=', Timestamp.fromDate(inicioDoMes))
         );
 
         const snap = await getDocs(q);
         setVendasMes(snap.size);
 
-        let somaMinutos = 0;
-        let contagemValida = 0;
-        snap.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.dataSolicitacao && data.dataVenda) {
-            const minutos = (data.dataVenda.seconds - data.dataSolicitacao.seconds) / 60;
-            if (minutos >= 0) {
-              somaMinutos += minutos;
-              contagemValida++;
-            }
-          }
-        });
-        setTempoMedioMinutos(contagemValida > 0 ? somaMinutos / contagemValida : null);
+        const vendas = [];
+        snap.forEach((docSnap) => vendas.push(paraSolicitacao(docSnap.id, docSnap.data())));
+        setTempoMedioMinutos(mediaLeadTimeMinutos(vendas));
       }
     } catch (e) {
       console.error("Erro ao carregar metas:", e);

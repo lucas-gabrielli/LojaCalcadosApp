@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "node --test \"testes/**/*.test.mjs\" && node ferramentas/verificar-escopo.mjs && node ferramentas/verificar-estilos.mjs && node ferramentas/verificar-navegacao.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

@@ -8,26 +8,22 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { db, auth } from './firebaseConfig';
+import { auth } from './firebaseConfig';
+// ADR-001: esta tela não fala mais com o Firestore nem contém regra de negócio.
 import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  updateDoc,
-  increment,
-  Timestamp,
-  orderBy
-} from 'firebase/firestore';
+  assinarPendentesDoVendedor,
+  buscarVariacao,
+  aplicarEscritas
+} from './dados/solicitacoesRepo';
+import { planejarVenda, planejarCancelamento, calcularMinutosDesde, classificarUrgencia } from './dominio/solicitacao';
 
 import { ThemeContext } from './ThemeContext';
 import { getSolicitacoesStyles } from './styles';
 import AppAlert, { useAppAlert } from './AppAlert';
 
-const formatarTempoDecorrido = (timestamp) => {
-  if (!timestamp) return '';
-  const segundos = Math.floor((Date.now() - timestamp.seconds * 1000) / 1000);
+const formatarTempoDecorrido = (data, agora = new Date()) => {
+  if (!data) return '';
+  const segundos = Math.floor((agora.getTime() - data.getTime()) / 1000);
   if (segundos < 60) return 'agora mesmo';
   const minutos = Math.floor(segundos / 60);
   if (minutos < 60) return `há ${minutos} min`;
@@ -37,9 +33,15 @@ const formatarTempoDecorrido = (timestamp) => {
   return `há ${dias} dia${dias > 1 ? 's' : ''}`;
 };
 
+const INTERVALO_TICK_MS = 30000;
+
 export default function SolicitacoesScreen() {
   const [loading, setLoading] = useState(true);
   const [solicitacoesPendentes, setSolicitacoesPendentes] = useState([]);
+  // Sem este tick, "há X min" e a cor de urgência ficavam congelados no valor
+  // calculado quando o Firestore mandou a lista — um pedido parado nunca
+  // esquentava sozinho.
+  const [agora, setAgora] = useState(() => new Date());
 
   const { isDarkMode } = useContext(ThemeContext);
   const styles = getSolicitacoesStyles(isDarkMode);
@@ -50,42 +52,32 @@ export default function SolicitacoesScreen() {
     const usuarioLogado = auth.currentUser;
     if (!usuarioLogado) return;
 
-    const solicitacoesRef = collection(db, 'solicitacoes');
-    
-    const q = query(
-      solicitacoesRef,
-      where('usuario_email', '==', usuarioLogado.email),
-      where('status', '==', 'pendente'),
-      orderBy('dataSolicitacao', 'desc')
+    const unsubscribe = assinarPendentesDoVendedor(
+      usuarioLogado.email,
+      (lista) => {
+        setSolicitacoesPendentes(
+          lista.map((sol) => ({
+            ...sol,
+            dataSolicitacaoFormatada: sol.dataSolicitacao
+              ? sol.dataSolicitacao.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+              : '--/--/----',
+          }))
+        );
+        setLoading(false);
+      },
+      () => setLoading(false)
     );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const lista = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const dataFormatada = data.dataSolicitacao 
-          ? new Date(data.dataSolicitacao.seconds * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-          : '--/--/----';
-        
-        lista.push({
-          id: doc.id,
-          ...data,
-          dataSolicitacaoFormatada: dataFormatada,
-          tempoDecorrido: formatarTempoDecorrido(data.dataSolicitacao),
-        });
-      });
-      setSolicitacoesPendentes(lista);
-      setLoading(false);
-    }, (error) => {
-      console.error("Erro ao buscar pendentes: ", error);
-      setLoading(false);
-    });
 
     return () => unsubscribe();
   }, []);
 
-  // 2. FUNÇÃO DE DEVOLVER (CANCELA A SOLICITAÇÃO)
-  const handleDevolver = async (solicitacaoId) => {
+  useEffect(() => {
+    const id = setInterval(() => setAgora(new Date()), INTERVALO_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  // 2. DEVOLVER — quem decide é dominio/solicitacao.js, quem grava é o repositório.
+  const handleDevolver = async (solicitacao) => {
     showAlert({
       type: 'danger',
       title: 'Devolver Tênis',
@@ -96,9 +88,13 @@ export default function SolicitacoesScreen() {
           label: 'Devolver',
           style: 'destructive',
           onPress: async () => {
+            const plano = planejarCancelamento(solicitacao);
+            if (!plano.ok) {
+              showAlert({ type: 'warning', title: 'Não é possível devolver', message: plano.mensagem, actions: [{ label: 'OK' }] });
+              return;
+            }
             try {
-              const solRef = doc(db, 'solicitacoes', solicitacaoId);
-              await updateDoc(solRef, { status: 'cancelada' });
+              await aplicarEscritas(plano.escritas);
             } catch (error) {
               console.error("Erro ao devolver: ", error);
               showAlert({ type: 'danger', title: 'Erro', message: 'Falha ao devolver o produto.', actions: [{ label: 'OK' }] });
@@ -109,7 +105,7 @@ export default function SolicitacoesScreen() {
     });
   };
 
-  // 3. FUNÇÃO DE VENDER (BAIXA NO ESTOQUE)
+  // 3. VENDER — a regra (e a revalidação de estoque) vive no domínio.
   const handleVender = async (solicitacao) => {
     showAlert({
       type: 'success',
@@ -121,14 +117,13 @@ export default function SolicitacoesScreen() {
           label: 'Vender',
           onPress: async () => {
             try {
-              const solRef = doc(db, 'solicitacoes', solicitacao.id);
-              await updateDoc(solRef, { status: 'vendida', dataVenda: Timestamp.now() });
-
-              const varRef = doc(db, 'variacoes', solicitacao.variacao_id);
-              await updateDoc(varRef, {
-                estoque: increment(-solicitacao.quantidade)
-              });
-
+              const variacao = await buscarVariacao(solicitacao.variacao_id);
+              const plano = planejarVenda(solicitacao, variacao);
+              if (!plano.ok) {
+                showAlert({ type: 'warning', title: 'Não é possível vender', message: plano.mensagem, actions: [{ label: 'OK' }] });
+                return;
+              }
+              await aplicarEscritas(plano.escritas);
               showAlert({ type: 'success', title: 'Sucesso', message: 'Venda finalizada e estoque atualizado!', actions: [{ label: 'OK' }] });
             } catch (error) {
               console.error("Erro ao vender: ", error);
@@ -140,15 +135,28 @@ export default function SolicitacoesScreen() {
     });
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
+  const renderItem = ({ item }) => {
+    const urgencia = classificarUrgencia(calcularMinutosDesde(item.dataSolicitacao, agora));
+    const tempoDecorrido = formatarTempoDecorrido(item.dataSolicitacao, agora);
+    return (
+    <View style={[
+      styles.card,
+      urgencia === 'atencao' && styles.cardAtencao,
+      urgencia === 'critico' && styles.cardCritico,
+    ]}>
       <View style={styles.cardHeader}>
         <View style={{ flex: 1 }}>
             <Text style={styles.produtoNome} numberOfLines={1}>{item.nomeProduto}</Text>
             <Text style={styles.produtoDetalhes}>Tam: {item.tamanho}  •  Qtd: {item.quantidade}</Text>
             <View style={styles.tempoDecorridoRow}>
-              <Ionicons name="time-outline" size={14} color={styles.tempoDecorridoText.color} />
-              <Text style={styles.tempoDecorridoText}>{item.tempoDecorrido}</Text>
+              <Ionicons
+                name="time-outline"
+                size={14}
+                color={urgencia === 'critico' ? styles.tempoDecorridoTextCritico.color : styles.tempoDecorridoText.color}
+              />
+              <Text style={[styles.tempoDecorridoText, urgencia === 'critico' && styles.tempoDecorridoTextCritico]}>
+                {tempoDecorrido}
+              </Text>
             </View>
         </View>
         <Text style={styles.tempoBadge}>{item.dataSolicitacaoFormatada}</Text>
@@ -157,7 +165,7 @@ export default function SolicitacoesScreen() {
       <View style={styles.actionRow}>
         <Pressable 
             style={[styles.btnAction, styles.btnDevolver]} 
-            onPress={() => handleDevolver(item.id)}
+            onPress={() => handleDevolver(item)}
         >
             <Ionicons name="close-circle-outline" size={20} color={styles.btnDevolverText.color} />
             <Text style={styles.btnDevolverText}>Devolver</Text>
@@ -172,7 +180,8 @@ export default function SolicitacoesScreen() {
         </Pressable>
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -186,6 +195,7 @@ export default function SolicitacoesScreen() {
           data={solicitacoesPendentes}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
+          extraData={agora}
           contentContainerStyle={{ paddingBottom: 130 }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>

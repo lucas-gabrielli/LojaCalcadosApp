@@ -1,0 +1,4 @@
+{
+  "//": "Faz o Node tratar dominio/*.js como ES Modules ao rodar `npm test`. O Metro/Expo ignora este arquivo — nada muda no app.",
+  "type": "module"
+}

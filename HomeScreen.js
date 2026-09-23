@@ -1,12 +1,13 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 
 import { ThemeContext } from './ThemeContext';
 import { auth, db } from './firebaseConfig';
 import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { getHomeStyles } from './styles';
+import { useMenuLateral, MenuLateralOverlay } from './MenuLateral';
 
 const formatarNomeDoEmail = (email) => {
   const prefixo = email.split('@')[0].split(/[._0-9]/)[0];
@@ -17,10 +18,10 @@ const formatarNomeDoEmail = (email) => {
 const ATALHOS = [
   { icon: 'bag-handle-outline', label: 'Sacola', target: (nav) => nav.navigate('Sacola') },
   { icon: 'receipt-outline', label: 'Solicitações', target: (nav) => nav.navigate('Solicitações') },
-  { icon: 'document-text-outline', label: 'Relatórios', target: (nav) => nav.navigate('Configurações', { screen: 'Relatorio' }) },
-  { icon: 'time-outline', label: 'Histórico', target: (nav) => nav.navigate('Configurações', { screen: 'Historico' }) },
-  { icon: 'trending-up-outline', label: 'Metas', target: (nav) => nav.navigate('Configurações', { screen: 'Metas' }) },
-  { icon: 'settings-outline', label: 'Configurações', target: (nav) => nav.navigate('Configurações') },
+  { icon: 'document-text-outline', label: 'Relatórios', target: (nav) => nav.navigate('Relatorio') },
+  { icon: 'time-outline', label: 'Histórico', target: (nav) => nav.navigate('Historico') },
+  { icon: 'trending-up-outline', label: 'Metas', target: (nav) => nav.navigate('Metas') },
+  { icon: 'settings-outline', label: 'Configurações', target: (nav) => nav.navigate('Configuracoes') },
 ];
 
 export default function HomeScreen({ navigation }) {
@@ -31,6 +32,15 @@ export default function HomeScreen({ navigation }) {
 
   const [pendentes, setPendentes] = useState(0);
   const [vendasHoje, setVendasHoje] = useState(0);
+  const { abrirPeloAvatar, aoFocarInicio } = useMenuLateral();
+
+  // Quem entrou numa tela PELO MENU volta com o menu já aberto. Quem entrou
+  // por um atalho da grade, não. A decisão é de dominio/menuLateral.js.
+  useFocusEffect(
+    useCallback(() => {
+      aoFocarInicio();
+    }, [aoFocarInicio])
+  );
 
   const nomeExibicao = usuario?.email ? formatarNomeDoEmail(usuario.email) : 'Vendedor';
 
@@ -66,13 +76,16 @@ export default function HomeScreen({ navigation }) {
   }, [isFocused, usuario]);
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+    // O menu é irmão do ScrollView (nunca filho dele): assim a camada absoluta
+    // se posiciona contra a tela, e não contra o conteúdo rolável.
+    <View style={{ flex: 1 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.greeting}>Olá, {nomeExibicao} 👋</Text>
           <Text style={styles.greetingSubtitle}>Pronto para atender?</Text>
         </View>
-        <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Configurações')}>
+        <TouchableOpacity style={styles.avatarButton} onPress={abrirPeloAvatar} accessibilityLabel="Abrir menu">
           <Ionicons name="person-outline" size={22} color={isDarkMode ? '#aaa' : '#555'} />
         </TouchableOpacity>
       </View>
@@ -93,7 +106,7 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.statTileValue}>{pendentes}</Text>
           <Text style={styles.statTileLabel}>Solicitações pendentes</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.statTile} onPress={() => navigation.navigate('Configurações', { screen: 'Metas' })}>
+        <TouchableOpacity style={styles.statTile} onPress={() => navigation.navigate('Metas')}>
           <Text style={styles.statTileValue}>{vendasHoje}</Text>
           <Text style={styles.statTileLabel}>Vendas hoje</Text>
         </TouchableOpacity>
@@ -109,7 +122,10 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.gridLabel}>{atalho.label}</Text>
           </TouchableOpacity>
         ))}
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+
+      <MenuLateralOverlay navegar={(rota) => navigation.navigate(rota)} />
+    </View>
   );
 }

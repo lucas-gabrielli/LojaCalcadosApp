@@ -58,6 +58,7 @@ export default function AppAlert({ visible, type = 'info', title, message, actio
                   key={index}
                   style={[
                     styles.actionBtn,
+                    actions.length <= 2 && styles.actionBtnFlex,
                     isCancel ? styles.actionBtnCancel : { backgroundColor: isDestructive ? c.danger : accentColor },
                   ]}
                   onPress={() => handlePress(action)}

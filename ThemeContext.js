@@ -6,7 +6,7 @@ export const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
   const systemScheme = useColorScheme();
-  const [themeMode, setThemeMode] = useState('system');
+  const [themeMode, setThemeModeState] = useState('system');
   
   // NOVO: Estado para a Biometria
   const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
@@ -18,9 +18,20 @@ export const ThemeProvider = ({ children }) => {
       if (savedBiometry !== null) {
         setIsBiometricEnabled(JSON.parse(savedBiometry));
       }
+      // A escolha de Aparência também precisa sobreviver ao fechar o app.
+      const savedTheme = await AsyncStorage.getItem('@theme_mode');
+      if (savedTheme !== null) {
+        setThemeModeState(savedTheme);
+      }
     };
     loadSettings();
   }, []);
+
+  // Salva a preferência de aparência junto com a troca.
+  const setThemeMode = async (novoModo) => {
+    setThemeModeState(novoModo);
+    await AsyncStorage.setItem('@theme_mode', novoModo);
+  };
 
   // Função para salvar a preferência
   const toggleBiometry = async () => {
